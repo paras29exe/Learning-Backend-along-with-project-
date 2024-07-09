@@ -14,4 +14,11 @@ app.use(express.urlencoded({extended: true, limit: "20kb"}))
 app.use(express.static("public"))
 app.use(cookieParser())
 
+// routes imported 
+import userRouter from "./routes/user.routes.js";
+
+// using routes
+// we can't use app.get here because "controllers and routes" are in separate files and now we are giving control to user.routes.js
+app.use("/api/v1/users", userRouter)
+
 export {app}
