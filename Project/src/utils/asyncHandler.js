@@ -4,7 +4,7 @@ const asyncHandler = (requestHandler) => {return (req, res, next) => {
     } 
 }
 
-export default asyncHandler
+export {asyncHandler}
 
 /*
 make a asyncHandler function with try catch
