@@ -86,4 +86,5 @@ userSchema.methods.generateRefreshToken = function () {
     )
 }
 
+// mongo db stores model name in lowercase and in plural form
 export const User = mongoose.model("User", userSchema)

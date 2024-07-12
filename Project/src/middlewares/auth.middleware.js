@@ -14,19 +14,19 @@ const verifyJWT = asyncHandler(async (req, res, next) => {
             throw new ApiError(401, "Access token is required");
         }
 
+        // we have stored a lot of information in access_token using jwt ~ refer to user.model.js :: 66 ~
         const decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
+        
         const user = await User.findById(decoded?._id).select("-password -refreshToken");
 
         if (!user) {
-            throw new ApiError(404, "Invalid Access Token");
+            throw new ApiError(404, "Access token expired , Please login again");
         }
 
         req.user = user;
         next();
     } catch (error) {
-        
-            throw new ApiError(402, "Invalid Access Token");
-
+            throw new ApiError(402, "No Access Token! Please Login first");
     }
 });
 

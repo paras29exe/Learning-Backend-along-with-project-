@@ -1,9 +1,10 @@
 import { asyncHandler } from "../utils/asyncHandler.js"
 import { ApiError } from "../utils/apiError.js"
 import { User } from "../models/user.model.js"
-import { fileUploadOnCloudinary } from "../utils/cloudinary.js"
+import { fileUploadOnCloudinary, deleteFileFromCloudinary } from "../utils/cloudinary.js"
 import { ApiResponse } from "../utils/apiResponse.js"
 import jwt from "jsonwebtoken"
+import { Video } from "../models/video.model.js"
 
 const generateAccessAndRefreshToken = async (userId) => {
     // try catch 
@@ -52,7 +53,7 @@ const registerUser = asyncHandler(async (req, res) => {
     if (req.files && Array.isArray(req.files.avatar) && req.files.avatar.length > 0) {
         avatarLocalPath = req.files.avatar[0].path
     } else {
-        throw new ApiError(400, "Avatar is required")
+        throw new ApiError(400, "Avatar is required field")
     }
 
     if (req.files && Array.isArray(req.files.coverImage) && req.files.coverImage.length > 0) {
@@ -69,6 +70,9 @@ const registerUser = asyncHandler(async (req, res) => {
         coverImage = await fileUploadOnCloudinary(coverImageLocalPath)
     }
 
+    /* it will create a new document in "users" named collection and if collection doesn't exists,
+      it will create a collection first with the name of model created in user.model.js */
+
     const user = await User.create({
         fullName,
         email,
@@ -77,6 +81,18 @@ const registerUser = asyncHandler(async (req, res) => {
         avatar: avatar,
         coverImage: coverImage || ""
     })
+
+    // another way to create a new document in "users" named collection 
+    /* const user = new User({
+        fullName,
+        email,
+        username: username.toLowerCase(),
+        password,
+        avatar: avatar,
+        coverImage: coverImage || ""
+    })
+        await user.save() // save user document in database
+    */
 
     const createdUser = await User.findById(user._id).select(
         "-password -refreshToken" // minus "-" sign means these values will not be displayed in created user
@@ -101,8 +117,6 @@ const loginUser = asyncHandler(async (req, res) => {
     // send cookies
 
     const { username, email, password } = req.body
-    console.log(req.body);
-
 
     if (!username && !email) {
         throw new ApiError(400, "Username or email is required")
@@ -117,7 +131,7 @@ const loginUser = asyncHandler(async (req, res) => {
         throw new ApiError(401, "Username or Email not found")
     }
 
-    const isPassValid = await user.isPasswordCorrect(password)
+    const isPassValid = await user.isPasswordCorrect(String(password))
 
     if (!isPassValid) {
         throw new ApiError(401, "Invalid Password")
@@ -190,6 +204,7 @@ const refreshTheTokens = asyncHandler(async (req, res, next) => {
             .cookie("accessToken", accessToken, options)
             .cookie("refreshToken", refreshToken, options)
             .json(new ApiResponse(200, { user: loggedUser, accessToken, newRefreshToken: refreshToken }, "Access token refreshed successfully"))
+
     } catch (error) {
         throw new ApiError("Failed to refresh access token", error)
     }
@@ -243,7 +258,6 @@ const updateAccountDetails = asyncHandler(async (req, res) => {
             .json(new ApiResponse(400, {}, "No Changes have been made"))
 
     } else {
-
         // storing the changed field to return in response by selecting the changed field
         const changes = (fullName && email) ? "fullName email" : fullName ? "fullName" : "email"
 
@@ -258,73 +272,10 @@ const updateAccountDetails = asyncHandler(async (req, res) => {
         ).select(`-_id ${changes}`)
 
         return res.status(200)
-            .json(new ApiResponse(200, { changes: userAccount }, "Account details updated successfully!"))
+            .json(new ApiResponse(200, userAccount, "Account details updated successfully!"))
     }
 
 })
-
-// const updateAvatarOrCover = asyncHandler(async (req, res) => {
-
-//     let avatarLocalPath;
-//     let coverImageLocalPath;
-
-//     if (req.files && Array.isArray(req.files.avatar) && req.files.avatar.length > 0) {
-//         avatarLocalPath = req.files.avatar[0].path
-//     } else {
-//         console.log("Avatar file was missing")
-//     }
-
-//     if (req.files && Array.isArray(req.files.coverImage) && req.files.coverImage.length > 0) {
-//         coverImageLocalPath = req.files.coverImage[0].path
-//     } else {
-//         console.log("CoverImage file was missing")
-//     }
-
-//     let avatar;
-//     let coverImage;
-
-//     if (!avatarLocalPath && !coverImageLocalPath) {
-
-//         return res.status(400)
-//         .json(new ApiResponse(400, {}, "No avatar or cover image file given by user"));
-
-//     } else {
-//         // Upload avatar to Cloudinary
-//         if (avatarLocalPath) {
-//             try {
-//                 avatar = await fileUploadOnCloudinary(avatarLocalPath);
-//             } catch (err) {
-//                 throw new ApiError(500, {}, "Failed to upload avatar to Cloudinary");
-//             }
-//         }
-
-//         // Upload cover image to Cloudinary
-//         if (coverImageLocalPath) {
-//             try {
-//                 coverImage = await fileUploadOnCloudinary(coverImageLocalPath);
-//             } catch (err) {
-//                 throw new ApiError(500, {}, "Failed to upload cover image to Cloudinary");
-//             }
-//         }
-
-//         const changes = (avatar && coverImage) ? "avatar coverImage" : avatar ? "avatar" : "coverImage";
-
-//         const user = await User.findByIdAndUpdate(req.user?._id,
-//             {
-//                 $set: {
-//                     avatar: avatar || req.user.avatar,
-//                     coverImage: coverImage || req.user.coverImage
-//                 }
-//             },
-//             { new: true }
-//         ).select(changes)
-
-//         return res.status(200)
-//             .json(
-//                 new ApiResponse(200, user, "Avatar and / or cover image updated successfully!")
-//             )
-//     }
-// })
 
 const updateAvatar = asyncHandler(async (req, res) => {
     // take avatar file from user
@@ -335,6 +286,10 @@ const updateAvatar = asyncHandler(async (req, res) => {
     if (!avatarLocalPath) {
         throw new ApiError(400, "File was not given by user")
     }
+
+    // fetching old avatar link from user object to delete it after uploading new one
+    const user = await User.findById(req.user?._id)
+    const oldAvatar = user.avatar
 
     const avatar = await fileUploadOnCloudinary(avatarLocalPath)
 
@@ -351,19 +306,26 @@ const updateAvatar = asyncHandler(async (req, res) => {
         { new: true }
     ).select("avatar")
 
+    // deleting old avatar
+    await deleteFileFromCloudinary(oldAvatar)
+
     return res.status(200)
-    .json(new ApiResponse(200, {Changes: changes}, "Avatar has been updated!"))
+        .json(new ApiResponse(200, { Changes: changes }, "Avatar has been updated!"))
 })
 
 const updateCoverImage = asyncHandler(async (req, res) => {
     // take cover file from user
     // upload new cover to cloudinary
     // find the user and make changes in cover in db
-    const coverImageLocalPath = req.file?.path
+    const coverImageLocalPath = req.file && req.file.path
 
     if (!coverImageLocalPath) {
         throw new ApiError(400, "File was not given by user")
     }
+
+    // fetching old cover image link from user object to delete it after uploading new one
+    const user = await User.findById(req.user?._id)
+    const oldCoverImage = user.coverImage
 
     const coverImage = await fileUploadOnCloudinary(coverImageLocalPath)
 
@@ -380,9 +342,57 @@ const updateCoverImage = asyncHandler(async (req, res) => {
         { new: true }
     ).select("coverImage")
 
+    // deleting old cover image
+    await deleteFileFromCloudinary(oldCoverImage)
+
     return res.status(200)
-    .json(new ApiResponse(200, {Changes: changes}, "Cover image has been updated!"))
+        .json(new ApiResponse(200, { Changes: changes }, "Cover image has been updated!"))
 })
+
+const getAllVideos = asyncHandler(async (req, res) => {
+    // fetch all public and private videos of the logged in user
+    // return the videos with their details
+
+    const {username} = req.params
+    const user = await User.findOne({ username })
+
+    if(!user) throw new ApiError(404, "User not found !")
+
+    try {
+        
+        const allVideos = await Video.aggregate([
+            {
+                $match: {
+                    ownerId: req.user._id,
+                }
+            },
+            {
+                $facet: {
+                    publicVideos: [
+                        {
+                            $match: {
+                                publishStatus: "public"
+                            }
+                        }
+                    ],
+                    privateVideos: [
+                        {
+                            $match: {
+                                publishStatus: "private"
+                            }
+                        }
+                    ]
+                }
+            }
+        ]);
+
+        res.status(200)
+        .json(new ApiResponse(200, allVideos[0], "fetched  all the videos"));
+
+    } catch (error) {
+        throw new ApiError(500, "Failed to fetch videos", error)
+    }
+});
 
 export {
     registerUser,
@@ -391,7 +401,8 @@ export {
     refreshTheTokens,
     changeCurrentPassword,
     getCurrentUser,
-    updateAccountDetails,
+    updateAccountDetails,   
     updateAvatar,
-    updateCoverImage
+    updateCoverImage,
+    getAllVideos
 }
