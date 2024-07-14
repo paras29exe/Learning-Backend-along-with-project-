@@ -1,7 +1,7 @@
 import { asyncHandler } from "../utils/asyncHandler.js";
 import mongoose from "mongoose";
 import { ApiError } from "../utils/apiError.js";
-import { ApiResponse } from "../utils/apiResponse.js";
+import { ApiResponse } from "../utils/ApiResponse.js"
 import { Video } from "../models/video.model.js"
 import { deleteFileFromCloudinary, fileUploadOnCloudinary } from "../utils/cloudinary.js";
 
@@ -162,31 +162,177 @@ const togglePublishStatus = asyncHandler(async (req, res) => {
     const { publishStatus } = req.body
     const { video, videoOwner } = await findOwnerOfVideo(req)
 
-    if (videoOwner !== req.user?._id.toString()) {
-        throw new ApiError(404, "Unauthorised to Change publish status of the video")
+    if (publishStatus !== video.publishStatus) {
+
+        if (videoOwner !== req.user?._id.toString()) {
+            throw new ApiError(404, "Unauthorised to Change publish status of the video")
+        }
+
+        if (!publishStatus) {
+            throw new ApiError(400, "Change the status before submitting")
+        }
+
+        const toggleStatus = await Video.findByIdAndUpdate(video._id,
+            {
+                $set: {
+                    publishStatus: publishStatus.toLowerCase(),
+                }
+            },
+            { new: true }
+        ).select("thumbnail videoFile publishStatus ownerId")
+
+        return res.status(200)
+            .json(new ApiResponse(200, toggleStatus, "Publish Status changed successfully"))
+
+    } else {
+        return res.status(400)
+            .json(new ApiResponse(400, {}, "No changes provided by user"))
+    }
+})
+
+const playVideo = asyncHandler(async (req, res) => {
+    // take video id from request
+    // make a aggregation pipeline by finding the video 
+    // in the next step find the details of channel of owner of video
+    // then find the likes and dislikes for the video
+    // then find the comments that have same video id
+    // finally return the response with all the required details
+
+    const { videoId } = req.params
+
+    if (!mongoose.Types.ObjectId.isValid(videoId)) {
+        throw new ApiError(404, "Invalid Video Id provided")
     }
 
-    if (!publishStatus) {
-        throw new ApiError(400, "Change the status before submitting")
-    }
-
-    const toggleStatus = await Video.findByIdAndUpdate(video._id,
+    // refer to "src/reference/reference_for_playvideo_page.png" to know why we are collecting all this data
+    const videoPage = await Video.aggregate([
         {
-            $set: {
-                publishStatus : publishStatus.toLowerCase(),
+            $facet: {
+                videoDetails: [
+                    {
+                        $match: {
+                            _id: mongoose.Types.ObjectId.createFromHexString(videoId),
+                            publishStatus: "public",
+                        }
+                    },
+                    {
+                        $addFields: { videoId: "$_id" }
+                    },
+                    {
+                        $lookup: {
+                            from: "users",
+                            localField: "ownerId",
+                            foreignField: "_id",
+                            as: "channelDetails",
+                        }
+                    },
+                    {
+                        $unwind: "$channelDetails",
+                    },
+                    {
+                        $addFields: {
+                            channelDetails: {
+                                channelName: "$channelDetails.fullName",
+                            }
+                        }
+                    },
+                    {
+                        $lookup: {
+                            from: "comments",
+                            localField: "_id",
+                            foreignField: "videoId",
+                            as: "comments",
+                        }
+                    },
+                    {
+                        $addFields: {
+                            comments: {
+                                $sortArray: { input: "$comments", sortBy: { createdAt: -1 } }
+                            }
+                        }
+                    },
+                    {
+                        $project: {
+                            _id: 0,
+                            videoId: 1,
+                            title: 1,
+                            description: 1,
+                            thumbnail: 1,
+                            videoFile: 1,
+                            likes: 1,
+                            ownerId: 1,
+                            channelDetails: {
+                                _id: 1,
+                                username: 1,
+                                channelName: 1,
+                                avatar: 1,
+                            },
+                            comments: 1
+                        }
+                    },
+                ],
+                randomVideos: [
+                    {
+                        $match: {
+                            // "publishStatus": "private",
+                            _id: { $ne: mongoose.Types.ObjectId.createFromHexString(videoId) }
+                        }
+                    },
+                    {
+                        $sample: { size: 10 }
+                    },
+                    {
+                        $lookup: {
+                            from: "users",
+                            localField: "ownerId",
+                            foreignField: "_id",
+                            as: "channelDetails",
+                        }
+                    },
+                    {
+                        $unwind: "$channelDetails",
+                    },
+                    {
+                        $addFields: {
+                            channelName: "$channelDetails.fullName",
+                            channelAvatar: "$channelDetails.avatar"
+                        }
+                    },
+                    {
+                        $project: {
+                            _id: 1,
+                            title: 1,
+                            thumbnail: 1,
+                            videoFile: 1,
+                            views: 1,
+                            createdAt: 1,
+                            channelName: 1,
+                            channelAvatar: 1,
+                            // channelDetails: 0
+                        }
+                    },
+                ]
             }
         },
-        { new: true }
-    ).select("thumbnail videoFile publishStatus ownerId")
+    ])
+
+    if (!videoPage[0].videoDetails.length) {
+        throw new ApiError(404, "This video is private and cannot be played")
+    }
+
+    const result = {
+        videoDetails: videoPage[0].videoDetails[0],
+        randomVideos: videoPage[0].randomVideos,
+    }
 
     return res.status(200)
-        .json(new ApiResponse(200, toggleStatus, "Publish Status changed successfully"))
-
+    .json(new ApiResponse(200, result, "Video Page Data has been fetched"))
 })
 
 export {
     uploadVideo,
     updateVideoDetails,
     deleteVideo,
-    togglePublishStatus
+    togglePublishStatus,
+    playVideo,
 }

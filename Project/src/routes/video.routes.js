@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { uploadVideo, updateVideoDetails, deleteVideo, togglePublishStatus } from "../controllers/video.controller.js";
+import { uploadVideo, updateVideoDetails, deleteVideo, togglePublishStatus, playVideo } from "../controllers/video.controller.js";
 import { verifyJWT } from "../middlewares/auth.middleware.js"
 import { upload } from "../middlewares/multer.middleware.js"
 
@@ -16,11 +16,13 @@ videoRouter.route("/upload-video").post(verifyJWT, upload.fields([
     }
 ]), uploadVideo )
 
-videoRouter.route("/:videoId/update-video-details").patch(verifyJWT, upload.single("thumbnail"), updateVideoDetails)
+videoRouter.route("/update-video-details/:videoId").patch(verifyJWT, upload.single("thumbnail"), updateVideoDetails)
 
-videoRouter.route("/:videoId/delete-video").delete(verifyJWT, deleteVideo )
+videoRouter.route("/delete-video/:videoId").delete(verifyJWT, deleteVideo )
 
-videoRouter.route("/:videoId/toggle-publish-status").patch(verifyJWT, togglePublishStatus)
+videoRouter.route("/toggle-publish-status/:videoId").patch(verifyJWT, togglePublishStatus)
+
+videoRouter.route("/play/:videoId").get(playVideo)
 
 
 export default videoRouter;

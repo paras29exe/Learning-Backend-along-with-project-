@@ -2,7 +2,7 @@ import { asyncHandler } from "../utils/asyncHandler.js"
 import { ApiError } from "../utils/apiError.js"
 import { User } from "../models/user.model.js"
 import { fileUploadOnCloudinary, deleteFileFromCloudinary } from "../utils/cloudinary.js"
-import { ApiResponse } from "../utils/apiResponse.js"
+import { ApiResponse } from "../utils/ApiResponse.js"
 import jwt from "jsonwebtoken"
 import { Video } from "../models/video.model.js"
 
@@ -349,7 +349,7 @@ const updateCoverImage = asyncHandler(async (req, res) => {
         .json(new ApiResponse(200, { Changes: changes }, "Cover image has been updated!"))
 })
 
-const getAllVideos = asyncHandler(async (req, res) => {
+const getUserVideos = asyncHandler(async (req, res) => {
     // fetch all public and private videos of the logged in user
     // return the videos with their details
 
@@ -404,5 +404,5 @@ export {
     updateAccountDetails,   
     updateAvatar,
     updateCoverImage,
-    getAllVideos
+    getUserVideos
 }

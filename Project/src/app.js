@@ -17,10 +17,12 @@ app.use(cookieParser())
 // routes imported 
 import userRouter from "./routes/user.routes.js";
 import videoRouter from "./routes/video.routes.js";
+import commentRouter from "./routes/comment.routes.js";
 
 // using routes
 // we can't use app.get here because "controllers and routes" are in separate files and now we are giving control to user.routes.js
 app.use("/api/v1/users", userRouter)
 app.use("/api/v1/videos", videoRouter)
+app.use("/api/v1/comments", commentRouter)
 
 export {app}
