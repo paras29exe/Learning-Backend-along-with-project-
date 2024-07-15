@@ -35,8 +35,13 @@ const videoSchema = new Schema({
         ref: "User",
         required: true
     },
-    ownerName: {
+    ownerChannelName: {
         type: String,
+        ref: "User"
+    },
+    ownerAvatar: {
+        type: String, // cloudinary url
+        ref: "User"
     }
 },{timestamps:true});
 

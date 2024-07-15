@@ -11,6 +11,8 @@ async function findOwnerOfVideo(req) {
     // frontend will associate the video id with each individual video while rendering videos list and then pass it in url when updating thumbnail
     const { videoId } = req.params;
 
+    if (!videoId) throw new ApiError(404, "Please provide a Video id ")
+
     if (!mongoose.Types.ObjectId.isValid(videoId)) {
         throw new ApiError(404, "Invalid Video Id provided")
     }
@@ -62,8 +64,10 @@ const uploadVideo = asyncHandler(async (req, res) => {
         description: String(description).trim(),
         thumbnail,
         videoFile,
-        ownerId: req.user,
-        ownerName: req.user.username
+        ownerId: req.user._id,
+        ownerchannelId: req.user.channelId,
+        ownerChannelName: req.user.fullName,
+        ownerAvatar: req.user.avatar
     })
 
     const uploadedVideo = await Video.findById(video?._id)
@@ -105,7 +109,7 @@ const updateVideoDetails = asyncHandler(async (req, res) => {
     }
 
 
-    const updatedVideo = await Video.findByIdAndUpdate(videoId,
+    const updatedVideo = await Video.findByIdAndUpdate(video._id,
         {
             $set: {
                 title: title || video.title,
@@ -143,7 +147,7 @@ const deleteVideo = asyncHandler(async (req, res) => {
     const deleted = await Video.deleteOne(video._id, { secure: true })
 
     if (!deleted) {
-        throw new ApiError(500, "Video Deletion failed")
+        throw new ApiError(500, "Video Deletion failed! Try again later")
     }
 
     // removing video and thumbnail from cloudinary
@@ -179,7 +183,9 @@ const togglePublishStatus = asyncHandler(async (req, res) => {
                 }
             },
             { new: true }
-        ).select("thumbnail videoFile publishStatus ownerId")
+        ).select("title thumbnail videoFile publishStatus views ownerId")
+
+        if (!toggleStatus) throw new ApiError(404, "Video with this Id not found")
 
         return res.status(200)
             .json(new ApiResponse(200, toggleStatus, "Publish Status changed successfully"))
@@ -189,6 +195,53 @@ const togglePublishStatus = asyncHandler(async (req, res) => {
             .json(new ApiResponse(400, {}, "No changes provided by user"))
     }
 })
+
+const getVideoById = asyncHandler(async (req, res) => {
+    // take video id from request
+    // find the video by id
+    // then find the likes and dislikes for the video
+    // finally return the response with all the required details
+    const { videoId } = req.params
+
+    if (!mongoose.Types.ObjectId.isValid(videoId)) {
+        throw new ApiError(404, "Invalid Video Id provided")
+    }
+
+    const video = await Video.findByIdAndUpdate(videoId,
+        {
+            $inc: { views: 1 }
+        },
+        { new: true }
+    )
+
+    if (!video) throw new ApiError(404, "Video with this ID not found")
+
+    return res.status(200)
+        .json(new ApiResponse(200, video, "Video fetched successfully"));
+})
+
+const getAllVideos = asyncHandler(async (req, res) => {
+    const { page = 1, limit = 10, sortBy = "createdAt", order = "desc" } = req.query;
+    const {channelId} = req.params;
+
+    if (!channelId) {
+        throw new ApiError(404, "Invalid Query! Please pass a channelId");
+    }
+
+    const sortOrder = (order === "desc") ? -1 : 1;
+
+    // Fetching videos with sorting and pagination
+    const videos = await Video.find({ ownerId: channelId, publishStatus: "public" })
+        .sort({ [sortBy]: sortOrder })
+        .skip((page - 1) * limit)
+        .limit(parseInt(limit))
+        .select("title thumbnail videoFile publishStatus views ownerId ownerChannelName createdAt");
+
+    const totalVideos = await Video.countDocuments({ ownerId: channelId, publishStatus: "public" });
+
+    return res.status(200)
+        .json(new ApiResponse(200, { videos, totalVideos }, "Videos fetched successfully"));
+});
 
 const playVideo = asyncHandler(async (req, res) => {
     // take video id from request
@@ -203,6 +256,14 @@ const playVideo = asyncHandler(async (req, res) => {
     if (!mongoose.Types.ObjectId.isValid(videoId)) {
         throw new ApiError(404, "Invalid Video Id provided")
     }
+
+    // increasing video views count by 1
+    await Video.updateOne({_id: videoId},
+        {
+            $inc: { views: 1 }
+        },
+        { new: true }
+    )
 
     // refer to "src/reference/reference_for_playvideo_page.png" to know why we are collecting all this data
     const videoPage = await Video.aggregate([
@@ -224,17 +285,25 @@ const playVideo = asyncHandler(async (req, res) => {
                             localField: "ownerId",
                             foreignField: "_id",
                             as: "channelDetails",
+                            pipeline: [
+                                {
+                                    $addFields: {
+                                        channelName: "$fullName",
+                                    }
+                                },
+                                {
+                                    $project: {
+                                        _id: 1,
+                                        channelId: 1,
+                                        channelName: 1,
+                                        avatar: 1,
+                                    }
+                                }
+                            ]
                         }
                     },
                     {
                         $unwind: "$channelDetails",
-                    },
-                    {
-                        $addFields: {
-                            channelDetails: {
-                                channelName: "$channelDetails.fullName",
-                            }
-                        }
                     },
                     {
                         $lookup: {
@@ -242,31 +311,26 @@ const playVideo = asyncHandler(async (req, res) => {
                             localField: "_id",
                             foreignField: "videoId",
                             as: "comments",
-                        }
-                    },
-                    {
-                        $addFields: {
-                            comments: {
-                                $sortArray: { input: "$comments", sortBy: { createdAt: -1 } }
-                            }
+                            pipeline: [
+                                {
+                                    $sort: {
+                                        createdAt: -1
+                                    }
+                                }
+                            ]
                         }
                     },
                     {
                         $project: {
-                            _id: 0,
-                            videoId: 1,
+                            _id: 1,
                             title: 1,
                             description: 1,
                             thumbnail: 1,
                             videoFile: 1,
+                            views: 1,
                             likes: 1,
                             ownerId: 1,
-                            channelDetails: {
-                                _id: 1,
-                                username: 1,
-                                channelName: 1,
-                                avatar: 1,
-                            },
+                            channelDetails: 1,
                             comments: 1
                         }
                     },
@@ -308,13 +372,17 @@ const playVideo = asyncHandler(async (req, res) => {
                             createdAt: 1,
                             channelName: 1,
                             channelAvatar: 1,
-                            // channelDetails: 0
+                            channelDetails: {
+                                _id: 1,
+                            }
                         }
                     },
                 ]
             }
         },
+
     ])
+
 
     if (!videoPage[0].videoDetails.length) {
         throw new ApiError(404, "This video is private and cannot be played")
@@ -326,7 +394,7 @@ const playVideo = asyncHandler(async (req, res) => {
     }
 
     return res.status(200)
-    .json(new ApiResponse(200, result, "Video Page Data has been fetched"))
+        .json(new ApiResponse(200, result, "Video Page Data has been fetched"))
 })
 
 export {
@@ -334,5 +402,7 @@ export {
     updateVideoDetails,
     deleteVideo,
     togglePublishStatus,
+    getVideoById,
+    getAllVideos,
     playVideo,
 }

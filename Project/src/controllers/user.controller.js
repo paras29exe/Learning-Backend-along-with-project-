@@ -349,50 +349,50 @@ const updateCoverImage = asyncHandler(async (req, res) => {
         .json(new ApiResponse(200, { Changes: changes }, "Cover image has been updated!"))
 })
 
-const getUserVideos = asyncHandler(async (req, res) => {
-    // fetch all public and private videos of the logged in user
-    // return the videos with their details
+// const getUserVideos = asyncHandler(async (req, res) => {
+//     // fetch all public and private videos of the logged in user
+//     // return the videos with their details
 
-    const {username} = req.params
-    const user = await User.findOne({ username })
+//     const {username} = req.params
+//     const user = await User.findOne({ username })
 
-    if(!user) throw new ApiError(404, "User not found !")
+//     if(!user) throw new ApiError(404, "User not found !")
 
-    try {
+//     try {
         
-        const allVideos = await Video.aggregate([
-            {
-                $match: {
-                    ownerId: req.user._id,
-                }
-            },
-            {
-                $facet: {
-                    publicVideos: [
-                        {
-                            $match: {
-                                publishStatus: "public"
-                            }
-                        }
-                    ],
-                    privateVideos: [
-                        {
-                            $match: {
-                                publishStatus: "private"
-                            }
-                        }
-                    ]
-                }
-            }
-        ]);
+//         const allVideos = await Video.aggregate([
+//             {
+//                 $match: {
+//                     ownerId: req.user._id,
+//                 }
+//             },
+//             {
+//                 $facet: {
+//                     publicVideos: [
+//                         {
+//                             $match: {
+//                                 publishStatus: "public"
+//                             }
+//                         }
+//                     ],
+//                     privateVideos: [
+//                         {
+//                             $match: {
+//                                 publishStatus: "private"
+//                             }
+//                         }
+//                     ]
+//                 }
+//             }
+//         ]);
 
-        res.status(200)
-        .json(new ApiResponse(200, allVideos[0], "fetched  all the videos"));
+//         res.status(200)
+//         .json(new ApiResponse(200, allVideos[0], "fetched  all the videos"));
 
-    } catch (error) {
-        throw new ApiError(500, "Failed to fetch videos", error)
-    }
-});
+//     } catch (error) {
+//         throw new ApiError(500, "Failed to fetch videos", error)
+//     }
+// });
 
 export {
     registerUser,
@@ -404,5 +404,5 @@ export {
     updateAccountDetails,   
     updateAvatar,
     updateCoverImage,
-    getUserVideos
+    // getUserVideos
 }

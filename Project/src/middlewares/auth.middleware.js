@@ -14,9 +14,9 @@ const verifyJWT = asyncHandler(async (req, res, next) => {
             throw new ApiError(401, "Access token is required");
         }
 
-        // we have stored a lot of information in access_token using jwt ~ refer to user.model.js :: 66 ~
         const decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
         
+        // we have stored a lot of information in access_token using jwt ~ refer to user.model.js :: 66 ~
         const user = await User.findById(decoded?._id).select("-password -refreshToken");
 
         if (!user) {
