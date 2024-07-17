@@ -144,5 +144,5 @@ export {
     addComment,
     getComments,
     editComment,
-    deleteComment
+    deleteComment,
 }
