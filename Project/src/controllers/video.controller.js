@@ -221,7 +221,7 @@ const getVideoById = asyncHandler(async (req, res) => {
         .json(new ApiResponse(200, video, "Video fetched successfully"));
 })
 
-const getAllVideos = asyncHandler(async (req, res) => {
+const getChannelVideos = asyncHandler(async (req, res) => {
     const { page = 1, limit = 20, sortBy = "createdAt", order = "desc" } = req.query;
     const { channelId } = req.params;
 
@@ -242,7 +242,40 @@ const getAllVideos = asyncHandler(async (req, res) => {
 
     return res.status(200)
         .json(new ApiResponse(200, { videos, totalVideos }, "Videos fetched successfully"));
-});
+})
+
+const getHomeVideos = asyncHandler(async (req, res) => {
+
+    const accessToken = req.cookies?.accessToken || req.header("Authorization")?.replace("Bearer ", "")
+
+    if (accessToken) {
+        const decodedToken = jwt.verify(accessToken, process.env.ACCESS_TOKEN_SECRET)
+
+        if (decodedToken) {
+            const user = await User.findById(decodedToken._id)
+            req.user = user
+        }
+    }
+
+    const { page = 1, limit = 30 } = req.query;
+
+    const query = {
+        publishStatus: "public",
+    }
+
+    if (req.user) {
+        query.ownerId = { $ne: req.user._id }
+    }
+
+    const homeVideos = await Video.find(query)
+        .skip((parseInt(page) - 1) * parseInt(limit))
+        .limit(parseInt(limit))
+
+    if (!homeVideos.length) return res.status(404).json(new ApiResponse(404, {}, "No videos available"))
+
+    return res.status(200)
+        .json(new ApiResponse(200, homeVideos, "Home videos fetched successfully"));
+})
 
 const playVideo = asyncHandler(async (req, res) => {
     // take video id from request
@@ -276,6 +309,14 @@ const playVideo = asyncHandler(async (req, res) => {
         },
         { new: true }
     )
+
+    const randomVideosQuery = {
+        "publishStatus": "public",
+        _id: { $ne: mongoose.Types.ObjectId.createFromHexString(videoId) }
+    }
+    if(req.user) {
+        randomVideosQuery.ownerId = { $ne: req.user._id }
+    }
 
     // refer to "src/reference/reference_for_playvideo_page.png" to know why we are collecting all this data
     const videoPage = await Video.aggregate([
@@ -497,10 +538,7 @@ const playVideo = asyncHandler(async (req, res) => {
                 ],
                 randomVideos: [
                     {
-                        $match: {
-                            // "publishStatus": "private",
-                            _id: { $ne: mongoose.Types.ObjectId.createFromHexString(videoId) }
-                        }
+                        $match: randomVideosQuery
                     },
                     {
                         $sample: { size: 15 }
@@ -544,7 +582,7 @@ const playVideo = asyncHandler(async (req, res) => {
         }
     ])
 
-    if ( Object.keys(videoPage[0].videoDetails).length === 0) {
+    if (Object.keys(videoPage[0].videoDetails).length === 0) {
         throw new ApiError(404, "This video is private and cannot be played")
     }
 
@@ -558,6 +596,7 @@ export {
     deleteVideo,
     togglePublishStatus,
     getVideoById,
-    getAllVideos,
+    getChannelVideos,
+    getHomeVideos,
     playVideo,
 }
