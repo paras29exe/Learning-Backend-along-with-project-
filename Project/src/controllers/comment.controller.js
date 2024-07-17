@@ -1,7 +1,7 @@
 import { Comment } from "../models/comment.model.js"
 import { asyncHandler } from "../utils/asyncHandler.js"
 import { ApiError } from "../utils/apiError.js"
-import { ApiResponse } from "../utils/ApiResponse.js"
+import { ApiResponse } from "../utils/apiResponse.js"
 import mongoose from "mongoose"
 
 // utility function to find owner and video document
@@ -49,9 +49,10 @@ const addComment = asyncHandler(async (req, res) => {
 
     const newComment = await Comment.create({
         content: String(content),
+        videoId: videoId,
         ownerId: req.user._id,
         ownerUsername: req.user.username,
-        videoId: videoId
+        ownerAvatar: req.user.avatar,
     })
 
     if (!newComment) throw new ApiError(500, "Error while adding comment")

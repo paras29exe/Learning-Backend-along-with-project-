@@ -1,11 +1,11 @@
 import { Router } from "express";
-import { registerUser, loginUser, logoutUser, refreshTheTokens, changeCurrentPassword, getCurrentUser, updateAccountDetails, updateAvatar, updateCoverImage } from "../controllers/user.controller.js";
+import { registerUser, loginUser, logoutUser, changeCurrentPassword, updateAvatar, updateCoverImage } from "../controllers/user.controller.js";
+import { refreshTheTokens, getCurrentUser, updateAccountDetails, getChannelById, deleteAccount } from "../controllers/user.controller.js";
 import { upload } from "../middlewares/multer.middleware.js"
 import { verifyJWT } from "../middlewares/auth.middleware.js";
 
 const userRouter = Router();
 
-// .post is middleware
 userRouter.route("/register").post(upload.fields([
     {
         name: "avatar",
@@ -16,7 +16,8 @@ userRouter.route("/register").post(upload.fields([
         maxCount: 1
     }
 ]),
-    registerUser )
+    registerUser
+)
 
 userRouter.route("/login").post(loginUser);
 
@@ -34,6 +35,8 @@ userRouter.route("/update-avatar").patch(verifyJWT, upload.single("avatar"), upd
 
 userRouter.route("/update-cover-image").patch(verifyJWT, upload.single("coverImage"), updateCoverImage)
 
-// userRouter.route("/user-videos/:username").get(verifyJWT, getUserVideos)
+userRouter.route("/get-channel/:channelId").get(getChannelById)
+
+userRouter.route("/delete-account").delete(verifyJWT, deleteAccount)
 
 export default userRouter

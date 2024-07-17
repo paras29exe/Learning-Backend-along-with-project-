@@ -2,9 +2,9 @@ import { asyncHandler } from "../utils/asyncHandler.js"
 import { ApiError } from "../utils/apiError.js"
 import { User } from "../models/user.model.js"
 import { fileUploadOnCloudinary, deleteFileFromCloudinary } from "../utils/cloudinary.js"
-import { ApiResponse } from "../utils/ApiResponse.js"
+import { ApiResponse } from "../utils/apiResponse.js"
 import jwt from "jsonwebtoken"
-import { Video } from "../models/video.model.js"
+import mongoose from "mongoose"
 
 const generateAccessAndRefreshToken = async (userId) => {
     // try catch 
@@ -349,50 +349,171 @@ const updateCoverImage = asyncHandler(async (req, res) => {
         .json(new ApiResponse(200, { Changes: changes }, "Cover image has been updated!"))
 })
 
-// const getUserVideos = asyncHandler(async (req, res) => {
-//     // fetch all public and private videos of the logged in user
-//     // return the videos with their details
+const getChannelById = asyncHandler(async (req, res) => {
+    const accessToken = req.cookies?.accessToken || req.header("Authorization")?.replace("Bearer ", "")
 
-//     const {username} = req.params
-//     const user = await User.findOne({ username })
+    if (accessToken) {
+        const decodedToken = jwt.verify(accessToken, process.env.ACCESS_TOKEN_SECRET)
 
-//     if(!user) throw new ApiError(404, "User not found !")
+        if (decodedToken) {
+            const user = await User.findById(decodedToken._id)
+            req.user = user
+        }
+    }
 
-//     try {
-        
-//         const allVideos = await Video.aggregate([
-//             {
-//                 $match: {
-//                     ownerId: req.user._id,
-//                 }
-//             },
-//             {
-//                 $facet: {
-//                     publicVideos: [
-//                         {
-//                             $match: {
-//                                 publishStatus: "public"
-//                             }
-//                         }
-//                     ],
-//                     privateVideos: [
-//                         {
-//                             $match: {
-//                                 publishStatus: "private"
-//                             }
-//                         }
-//                     ]
-//                 }
-//             }
-//         ]);
+    const { page = 1, limit = 24 } = req.query
+    const { channelId } = req.params
 
-//         res.status(200)
-//         .json(new ApiResponse(200, allVideos[0], "fetched  all the videos"));
+    if (!mongoose.isValidObjectId(channelId)) throw new ApiError(400, "Invalid Channel ID provided")
 
-//     } catch (error) {
-//         throw new ApiError(500, "Failed to fetch videos", error)
-//     }
-// });
+    const channel = await User.aggregate([
+        {
+            $facet: {
+                channelDetails: [
+                    { $match: { _id: mongoose.Types.ObjectId.createFromHexString(channelId) } },
+                    { $addFields: { channelName: "$fullName" } },
+                    // finding no. of documents in subscription collection that has his ID in "channel" field
+                    {
+                        $lookup: {
+                            from: "subscriptions",
+                            localField: "_id",
+                            foreignField: "channel",
+                            as: "subscribers"
+                        }
+                    },
+                    {
+                        // overwriting the matching documents with in array their size of array or count of documents 
+                        $addFields: {
+                            subscribers: { $size: "$subscribers" }
+                        }
+                    },
+                    {
+                        $lookup: {
+                            from: "subscriptions",
+                            let: {
+                                channel: "$_id",
+                                viewer: req.user?._id
+                            },
+                            pipeline: [
+                                {
+                                    $match: {
+                                        $expr: {
+                                            $and: [
+                                                { $eq: ["$channel", "$$channel"] },
+                                                { $eq: ["$subscriber", "$$viewer"] }
+                                            ]
+                                        }
+                                    }
+                                }
+                            ],
+                            as: "subscribedByViewer"
+                        }
+                    },
+                    {
+                        $addFields: {
+                            subscribedByViewer: {
+                                $cond: [
+                                    { $eq: [{ $size: "$subscribedByViewer" }, 1] },
+                                    true,
+                                    false
+                                ]
+                            }
+                        }
+                    },
+                    {
+                        $project: {
+                            fullName: 0,
+                            email: 0,
+                            password: 0,
+                            __v: 0,
+                            refreshToken: 0,
+                            watchHistory: 0,
+                            updatedAt: 0
+                        }
+                    }
+
+                ],
+                videos: [
+                    {
+                        $match: { _id: mongoose.Types.ObjectId.createFromHexString(channelId) },
+                    },
+                    {
+                        $lookup: {
+                            from: "videos",
+                            localField: "_id",
+                            foreignField: "ownerId",
+                            as: "videos",
+                            pipeline: [
+                                {
+                                    $sort: { "views": -1 }
+                                },
+                                {
+                                    $project: {
+                                        description: 0,
+                                        videoFile: 0,
+                                        publishStatus: 0,
+                                        updatedAt: 0,
+                                        __v: 0,
+                                        ownerUsername: 0,
+                                    }
+                                },
+                            ]
+                        }
+                    },
+                    { $unwind: "$videos" },
+                    { $replaceRoot: { newRoot: "$videos" } },
+                    { $skip: (page -1 ) * parseInt(limit)},
+                    { $limit: parseInt(limit) }
+                ]
+            },
+        },
+        {
+            $unwind: "$channelDetails"
+        },
+    ])
+
+    if (Object.keys(channel[0].channelDetails).length === 0) {
+        throw new ApiError(404, "Channel not found")
+    }
+
+    return res.status(200)
+        .json(new ApiResponse(200, channel[0], "Channel fetched successfully"));
+})
+
+const deleteAccount = asyncHandler(async (req, res) => {
+    const userId = req.user._id;
+    const session = await mongoose.startSession();
+
+    session.startTransaction();
+
+    try {
+        await User.findByIdAndDelete(userId).session(session);
+        await Video.deleteMany({ ownerId: userId }).session(session);
+        await Subscription.deleteMany({
+            $or: [
+                { subscriber: userId },
+                { channel: userId }
+            ]
+        }).session(session);
+        await Playlist.deleteMany({ ownerId: userId }).session(session);
+        await Comment.deleteMany({ ownerId: userId }).session(session);
+        await Like.deleteMany({ likedBy: userId }).session(session);
+
+        await session.commitTransaction();
+        session.endSession();
+
+        res.clearCookie('accessToken');
+        res.clearCookie('refreshToken');
+
+    } catch (error) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(500).json(new ApiResponse(500, {}, "Error deleting user and related data"));
+    }
+
+    return res.status(200)
+        .json(new ApiResponse(200, {}, "User and its all related data has been deleted"));
+});
 
 export {
     registerUser,
@@ -401,8 +522,9 @@ export {
     refreshTheTokens,
     changeCurrentPassword,
     getCurrentUser,
-    updateAccountDetails,   
+    updateAccountDetails,
     updateAvatar,
     updateCoverImage,
-    // getUserVideos
+    getChannelById,
+    deleteAccount,
 }

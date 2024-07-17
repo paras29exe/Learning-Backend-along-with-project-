@@ -1,8 +1,9 @@
 import { asyncHandler } from "../utils/asyncHandler.js";
 import mongoose from "mongoose";
 import { ApiError } from "../utils/apiError.js";
-import { ApiResponse } from "../utils/ApiResponse.js"
+import { ApiResponse } from "../utils/apiResponse.js"
 import { Video } from "../models/video.model.js"
+import { User } from "../models/user.model.js";
 import { deleteFileFromCloudinary, fileUploadOnCloudinary } from "../utils/cloudinary.js";
 
 // utility function to find owner and video document
@@ -221,8 +222,8 @@ const getVideoById = asyncHandler(async (req, res) => {
 })
 
 const getAllVideos = asyncHandler(async (req, res) => {
-    const { page = 1, limit = 10, sortBy = "createdAt", order = "desc" } = req.query;
-    const {channelId} = req.params;
+    const { page = 1, limit = 20, sortBy = "createdAt", order = "desc" } = req.query;
+    const { channelId } = req.params;
 
     if (!channelId) {
         throw new ApiError(404, "Invalid Query! Please pass a channelId");
@@ -247,9 +248,20 @@ const playVideo = asyncHandler(async (req, res) => {
     // take video id from request
     // make a aggregation pipeline by finding the video 
     // in the next step find the details of channel of owner of video
-    // then find the likes and dislikes for the video
-    // then find the comments that have same video id
+    // then find the likes 
+    // then find the comments and likes on those commentthat have same video id
     // finally return the response with all the required details
+
+    const accessToken = req.cookies?.accessToken || req.header("Authorization")?.replace("Bearer ", "")
+
+    if (accessToken) {
+        const decodedToken = jwt.verify(accessToken, process.env.ACCESS_TOKEN_SECRET)
+
+        if (decodedToken) {
+            const user = await User.findById(decodedToken._id)
+            req.user = user
+        }
+    }
 
     const { videoId } = req.params
 
@@ -258,7 +270,7 @@ const playVideo = asyncHandler(async (req, res) => {
     }
 
     // increasing video views count by 1
-    await Video.updateOne({_id: videoId},
+    await Video.updateOne({ _id: videoId },
         {
             $inc: { views: 1 }
         },
@@ -279,6 +291,54 @@ const playVideo = asyncHandler(async (req, res) => {
                     {
                         $addFields: { videoId: "$_id" }
                     },
+                    // looking how many documents in likes collection has video id of this as "video" field
+                    {
+                        $lookup: {
+                            from: "likes",
+                            localField: "_id",
+                            foreignField: "video",
+                            as: "likes",
+                        }
+                    },
+                    {
+                        $addFields: {
+                            likesCount: { $size: "$likes" }
+                        }
+                    },
+                    // finding if any document has viewer Id as "likedBy" and also video Id as "video"
+                    {
+                        $lookup: {
+                            from: "likes",
+                            let: {
+                                videoId: "$_id",
+                                viewer: req.user?.id
+                            },
+                            pipeline: [
+                                {
+                                    $match: {
+                                        $expr: {
+                                            $and: [
+                                                { $eq: ["$video", "$$videoId"] },
+                                                { $eq: ["$likedBy", "$$viewer"] }
+                                            ]
+                                        }
+                                    }
+                                },
+                            ],
+                            as: "likedOrNot"
+                        }
+                    },
+                    {
+                        $addFields: {
+                            likedByViewer: {
+                                $cond: [
+                                    { $eq: [{ $size: "$likedOrNot" }, 1] },
+                                    true,
+                                    false,
+                                ]
+                            }
+                        }
+                    },
                     {
                         $lookup: {
                             from: "users",
@@ -291,12 +351,62 @@ const playVideo = asyncHandler(async (req, res) => {
                                         channelName: "$fullName",
                                     }
                                 },
+                                // finding his subscribers from subscriptions collection that how many documents has his id as channel
+                                {
+                                    $lookup: {
+                                        from: "subscriptions",
+                                        localField: "_id",
+                                        foreignField: "channel",
+                                        as: "subscribers",
+                                    }
+                                },
+                                {
+                                    $addFields: {
+                                        subscribersCount: { $size: "$subscribers" },
+                                    }
+                                },
+                                // findind that whether viewer has subscribed or not by finding document which has viewer id as "subscriber" and channel id as "channel"
+                                {
+                                    $lookup: {
+                                        from: "subscriptions",
+                                        let: {
+                                            channelId: "$_id",
+                                            viewer: req.user?.id
+                                        },
+                                        pipeline: [
+                                            {
+                                                $match: {
+                                                    $expr: {
+                                                        $and: [
+                                                            { $eq: ["$channel", "$$channelId"] },
+                                                            { $eq: ["$subscriber", "$$viewer"] }
+                                                        ]
+                                                    }
+                                                }
+                                            },
+                                        ],
+                                        as: "subscribedOrNot"
+                                    }
+                                },
+                                {
+                                    $addFields: {
+                                        subscribedByViewer: {
+                                            $cond: [
+                                                { $eq: [{ $size: "$subscribedOrNot" }, 1] },
+                                                true,
+                                                false
+                                            ]
+                                        }
+                                    }
+                                },
                                 {
                                     $project: {
                                         _id: 1,
                                         channelId: 1,
                                         channelName: 1,
                                         avatar: 1,
+                                        subscribersCount: 1,
+                                        subscribedByViewer: 1
                                     }
                                 }
                             ]
@@ -316,7 +426,56 @@ const playVideo = asyncHandler(async (req, res) => {
                                     $sort: {
                                         createdAt: -1
                                     }
-                                }
+                                },
+                                {
+                                    $lookup: {
+                                        from: "likes",
+                                        localField: "_id",
+                                        foreignField: "comment",
+                                        as: "likesOnComment",
+                                    }
+                                },
+                                {
+                                    $addFields: {
+                                        // overwriting existing "likesOnComment" documents array with their count
+                                        likesOnComment: { $size: "$likesOnComment" }
+                                    }
+                                },
+                                {
+                                    $lookup: {
+                                        from: "likes",
+                                        let: {
+                                            commentId: "$_id",
+                                            viewer: req.user?.id
+                                        },
+                                        pipeline: [
+                                            {
+                                                $match: {
+                                                    $expr: {
+                                                        $and: [
+                                                            { $eq: ["$comment", "$$commentId"] },
+                                                            { $eq: ["$likedBy", "$$viewer"] }
+                                                        ]
+                                                    }
+                                                }
+                                            },
+                                        ],
+                                        as: "likedByViewer"
+                                    }
+                                },
+                                {
+                                    $addFields: {
+                                        // overwriting the existing "likedByViewer" field with true or false if it has viewer document in it or not
+                                        likedByViewer: {
+                                            $cond: [
+                                                { $eq: [{ $size: "$likedByViewer" }, 1] },
+                                                true,
+                                                false
+                                            ]
+                                        }
+                                    }
+                                },
+
                             ]
                         }
                     },
@@ -328,7 +487,8 @@ const playVideo = asyncHandler(async (req, res) => {
                             thumbnail: 1,
                             videoFile: 1,
                             views: 1,
-                            likes: 1,
+                            likesCount: 1,
+                            likedByViewer: 1, //
                             ownerId: 1,
                             channelDetails: 1,
                             comments: 1
@@ -343,7 +503,7 @@ const playVideo = asyncHandler(async (req, res) => {
                         }
                     },
                     {
-                        $sample: { size: 10 }
+                        $sample: { size: 15 }
                     },
                     {
                         $lookup: {
@@ -358,8 +518,9 @@ const playVideo = asyncHandler(async (req, res) => {
                     },
                     {
                         $addFields: {
+                            channelId: "$channelDetails._id",
                             channelName: "$channelDetails.fullName",
-                            channelAvatar: "$channelDetails.avatar"
+                            channelAvatar: "$channelDetails.avatar",
                         }
                     },
                     {
@@ -372,29 +533,23 @@ const playVideo = asyncHandler(async (req, res) => {
                             createdAt: 1,
                             channelName: 1,
                             channelAvatar: 1,
-                            channelDetails: {
-                                _id: 1,
-                            }
+                            channelId: 1,
                         }
                     },
                 ]
             }
         },
-
+        {
+            $unwind: "$videoDetails"
+        }
     ])
 
-
-    if (!videoPage[0].videoDetails.length) {
+    if ( Object.keys(videoPage[0].videoDetails).length === 0) {
         throw new ApiError(404, "This video is private and cannot be played")
     }
 
-    const result = {
-        videoDetails: videoPage[0].videoDetails[0],
-        randomVideos: videoPage[0].randomVideos,
-    }
-
     return res.status(200)
-        .json(new ApiResponse(200, result, "Video Page Data has been fetched"))
+        .json(new ApiResponse(200, videoPage[0], "Video Page Data has been fetched"))
 })
 
 export {

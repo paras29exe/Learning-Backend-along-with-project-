@@ -15,6 +15,10 @@ const commentSchema = new mongoose.Schema({
         ref: "User",
         required: true
     },
+    ownerAvatar: {
+        type: String, // cloudinary url
+        ref: "User"
+    },
     videoId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "Video",
