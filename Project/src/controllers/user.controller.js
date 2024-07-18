@@ -25,22 +25,18 @@ const generateAccessAndRefreshToken = async (userId) => {
     }
 }
 
-const registerUser = asyncHandler(async (req, res) => {
+const registerUser = asyncHandler(async (req, res, next) => {
     const { fullName, email, username, password } = req.body
 
-    const fields = [fullName, email, username, password].map((field) => field && String(field).trim())
+    if (!fullName || !email || !username || !password) throw new ApiError(404, "All fields are required")
 
-    // Check if any field is empty or null by using "some" method which return true if any field is empty
-    if (fields.some((field) => field === "")) {
-        throw new ApiError(400, "All fields are required")
-    }
     if (!email.trim().includes("@")) {
         throw new ApiError(400, "Invalid email")
     }
 
     // Check if email or username already exists in the database
     const existedUser = await User.findOne({
-        $or: [{ email: email }, { username: username }]
+        $or: [{ email: email }, { username: username.toLowerCase() }]
     })
 
     if (existedUser) {
@@ -60,7 +56,7 @@ const registerUser = asyncHandler(async (req, res) => {
     if (req.files && Array.isArray(req.files.coverImage) && req.files.coverImage.length > 0) {
         coverImageLocalPath = req.files.coverImage[0].path
     } else {
-        console.log("coverImageLocalPath : Warning! You didn't provided a coverImage")
+        console.log("coverImageLocalPath : Alert! You didn't provided a coverImage")
     }
 
     const avatar = await fileUploadOnCloudinary(avatarLocalPath)
@@ -78,38 +74,22 @@ const registerUser = asyncHandler(async (req, res) => {
         fullName,
         email,
         username: username.toLowerCase(),
-        password,
-        avatar: avatar,
+        password: String(password),
+        avatar,
         coverImage: coverImage || ""
     })
 
-    // another way to create a new document in "users" named collection 
-    /* const user = new User({
-        fullName,
-        email,
-        username: username.toLowerCase(),
-        password,
-        avatar: avatar,
-        coverImage: coverImage || ""
-    })
-        await user.save() // save user document in database
-    */
-
-    const createdUser = await User.findById(user._id).select(
-        "-password -refreshToken" // minus "-" sign means these values will not be displayed in created user
-    )
-    console.log("user created :", createdUser)
+    const createdUser = await User.findById(user._id)
 
     if (!createdUser) {
         throw new ApiError(500, "Something went wrong while creating user")
     }
 
-    return res.status(201).json(
-        new ApiResponse(200, createdUser, "User created successfully")
-    )
+    loginUser({ body: { username, password: String(password) } }, res, next)
+
 })
 
-const loginUser = asyncHandler(async (req, res) => {
+const loginUser = asyncHandler(async (req, res, next) => {
     // take data from req.body
     // take username or email to login
     // find user from db
@@ -140,7 +120,7 @@ const loginUser = asyncHandler(async (req, res) => {
 
     const { accessToken, refreshToken } = await generateAccessAndRefreshToken(user._id)
 
-    const loggedInUser = await User.findById(user._id).select("-password -refreshToken")
+    const loggedInUser = await User.findById(user._id).select("-password -refreshToken -watchHistory")
 
     // we need options when we send cookies to the server so that they can be modified only by server not by user
     const options = {
@@ -463,7 +443,7 @@ const getChannelById = asyncHandler(async (req, res) => {
                     },
                     { $unwind: "$videos" },
                     { $replaceRoot: { newRoot: "$videos" } },
-                    { $skip: (page -1 ) * parseInt(limit)},
+                    { $skip: (page - 1) * parseInt(limit) },
                     { $limit: parseInt(limit) }
                 ]
             },
@@ -489,16 +469,49 @@ const deleteAccount = asyncHandler(async (req, res) => {
 
     try {
         await User.findByIdAndDelete(userId).session(session);
+
+        // deleting user's channel avatar and cover
+        await deleteFileFromCloudinary(req.user.avatar);
+        (req.user.coverImage !== "") ? await deleteFileFromCloudinary(req.user.coverImage) : null;
+
+        // finding all videos of user
+        const videos = await Video.find({ ownerId: userId });
+
+        if (videos.length > 0) {
+
+            for (const video of videos) {
+                // deleting files of each video
+                await deleteFileFromCloudinary(video.thumbnail)
+                await deleteFileFromCloudinary(video.videoFile)
+
+                // deleting likes on each video of user
+                await Like.deleteMany({ video: video._id })
+
+                // finding comments of each video
+                const comments = await Comment.find({ videoId: video._id });
+
+                if (comments.length > 0) {
+                    for (const comment of comments) {
+                        // deleting likes on comments of each video of user
+                        await Like.deleteMany({ comment: comment._id }).session(session)
+                    }
+                }
+
+                // in last deleting all the comments on user videos 
+                await Comment.deleteMany({ videoId: video._id }).session(session);
+            }
+        }
+
         await Video.deleteMany({ ownerId: userId }).session(session);
+        await Like.deleteMany({ likedBy: userId }).session(session);
+        await Comment.deleteMany({ ownerId: userId }).session(session);
+        await Playlist.deleteMany({ ownerId: userId }).session(session);
         await Subscription.deleteMany({
             $or: [
                 { subscriber: userId },
                 { channel: userId }
             ]
         }).session(session);
-        await Playlist.deleteMany({ ownerId: userId }).session(session);
-        await Comment.deleteMany({ ownerId: userId }).session(session);
-        await Like.deleteMany({ likedBy: userId }).session(session);
 
         await session.commitTransaction();
         session.endSession();
@@ -509,7 +522,7 @@ const deleteAccount = asyncHandler(async (req, res) => {
     } catch (error) {
         await session.abortTransaction();
         session.endSession();
-        return res.status(500).json(new ApiResponse(500, {}, "Error deleting user and related data"));
+        throw new ApiError(500, "Failed to delete user and its related data", error);
     }
 
     return res.status(200)

@@ -18,22 +18,18 @@ const fileUploadOnCloudinary = async (localFilePath) => {
         return result.url;
 
     } catch (error) {
+
         fs.unlinkSync(localFilePath) // remove temporary file as upload fails
-
         throw new Error("Cloudinary Error:: File Uploading Error :: ", error.message);
-
     }
-
 }
 
 // Function to delete file from Cloudinary by public ID
-const deleteFileFromCloudinary = async function (oldFileLink) {
+const deleteFileFromCloudinary = async function (cloudinaryFileLink) {
     try {
-        const publicId = oldFileLink.split("/").slice(-1)[0].replace(".webp", "");
+        const publicId = cloudinaryFileLink.split("/").slice(-1)[0].split(".")[0]
         await cloudinary.uploader.destroy(publicId)
-        
-        console.log("File deleted successfully from Cloudinary");
-        
+        return true;
     } catch (error) {
         throw new Error("Cloudinary Error:: File Deletion Error :: ", error.message);
     }
