@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { registerUser, loginUser, logoutUser, changeCurrentPassword, updateAvatar, updateCoverImage } from "../controllers/user.controller.js";
-import { refreshTheTokens, getCurrentUser, updateAccountDetails, getChannelById, deleteAccount } from "../controllers/user.controller.js";
+import { refreshTheTokens, getCurrentUser, updateAccountDetails, getChannelById, getWatchHistory, deleteAccount } from "../controllers/user.controller.js";
 import { upload } from "../middlewares/multer.middleware.js"
 import { verifyJWT } from "../middlewares/auth.middleware.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
@@ -37,6 +37,8 @@ userRouter.route("/update-avatar").patch(verifyJWT, upload.single("avatar"), upd
 userRouter.route("/update-cover-image").patch(verifyJWT, upload.single("coverImage"), updateCoverImage)
 
 userRouter.route("/get-channel/:channelId").get(getChannelById)
+
+userRouter.route("/get-watch-history").get(verifyJWT, getWatchHistory)
 
 userRouter.route("/delete-account").delete(verifyJWT, deleteAccount)
 

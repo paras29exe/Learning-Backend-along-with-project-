@@ -197,30 +197,6 @@ const togglePublishStatus = asyncHandler(async (req, res) => {
     }
 })
 
-const getVideoById = asyncHandler(async (req, res) => {
-    // take video id from request
-    // find the video by id
-    // then find the likes and dislikes for the video
-    // finally return the response with all the required details
-    const { videoId } = req.params
-
-    if (!mongoose.Types.ObjectId.isValid(videoId)) {
-        throw new ApiError(404, "Invalid Video Id provided")
-    }
-
-    const video = await Video.findByIdAndUpdate(videoId,
-        {
-            $inc: { views: 1 }
-        },
-        { new: true }
-    )
-
-    if (!video) throw new ApiError(404, "Video with this ID not found")
-
-    return res.status(200)
-        .json(new ApiResponse(200, video, "Video fetched successfully"));
-})
-
 const getChannelVideos = asyncHandler(async (req, res) => {
     const { page = 1, limit = 20, sortBy = "createdAt", order = "desc" } = req.query;
     const { channelId } = req.params;
@@ -244,8 +220,8 @@ const getChannelVideos = asyncHandler(async (req, res) => {
         .json(new ApiResponse(200, { videos, totalVideos }, "Videos fetched successfully"));
 })
 
-const getHomeVideos = asyncHandler(async (req, res) => {
-
+const getHomeAndSearchVideos = asyncHandler(async (req, res) => {
+    // validating if user is logged in or not
     const accessToken = req.cookies?.accessToken || req.header("Authorization")?.replace("Bearer ", "")
 
     if (accessToken) {
@@ -257,24 +233,63 @@ const getHomeVideos = asyncHandler(async (req, res) => {
         }
     }
 
-    const { page = 1, limit = 30 } = req.query;
+    const { page = 1, limit = 30, sortBy, order="desc", query } = req.query;
 
-    const query = {
-        publishStatus: "public",
-    }
+    const sortOrder = (order === "desc") ? -1 : 1;
+
+    const pipeline = [];
 
     if (req.user) {
-        query.ownerId = { $ne: req.user._id }
+        pipeline.push(
+            {
+                $match: {
+                    ownerId: req.user._id,
+                    publishStatus: "public"
+                }
+            }
+        )
+    } else {
+        pipeline.push(
+            {
+                $match: {
+                    publishStatus: "public"
+                }
+            }
+        )
     }
 
-    const homeVideos = await Video.find(query)
-        .skip((parseInt(page) - 1) * parseInt(limit))
-        .limit(parseInt(limit))
+    if (query) {
+        pipeline.push(
+            {
+                $search: {
+                    index: "search-videos",
+                    text: {
+                        query: query,
+                        path: ["title", "ownerUsername"], // search in title and ownerUsername fields
+                    }
+                }
+            }
+        )
+    }
 
-    if (!homeVideos.length) return res.status(404).json(new ApiResponse(404, {}, "No videos available"))
+    const videos = await Video.aggregate(pipeline)
+
+    const options = {
+        page : parseInt(page),
+        limit : parseInt(limit),
+        select : "title thumbnail publishStatus views ownerId ownerChannelName createdAt"
+    }
+
+    if(sortBy && sortOrder ) {
+        options.sort = { [sortBy] : sortOrder }
+    }
+
+    const paginatedVideos = await Video.aggregatePaginate(videos, options)
+
+    if (!paginatedVideos.length) return res.status(404).json(new ApiResponse(404, {}, "No videos available"))
 
     return res.status(200)
-        .json(new ApiResponse(200, homeVideos, "Home videos fetched successfully"));
+        .json(new ApiResponse(200, paginatedVideos, "videos fetched successfully"));
 })
 
 const playVideo = asyncHandler(async (req, res) => {
@@ -302,19 +317,12 @@ const playVideo = asyncHandler(async (req, res) => {
         throw new ApiError(404, "Invalid Video Id provided")
     }
 
-    // increasing video views count by 1
-    await Video.updateOne({ _id: videoId },
-        {
-            $inc: { views: 1 }
-        },
-        { new: true }
-    )
-
     const randomVideosQuery = {
         "publishStatus": "public",
         _id: { $ne: mongoose.Types.ObjectId.createFromHexString(videoId) }
     }
-    if(req.user) {
+
+    if (req.user) {
         randomVideosQuery.ownerId = { $ne: req.user._id }
     }
 
@@ -586,6 +594,24 @@ const playVideo = asyncHandler(async (req, res) => {
         throw new ApiError(404, "This video is private and cannot be played")
     }
 
+    // increasing video views count by 1
+    await Video.updateOne({ _id: videoId },
+        {
+            $inc: { views: 1 }
+        },
+        { new: true }
+    )
+
+    // adding it to users watch History 
+    await User.findByIdAndUpdate(req.user?._id,
+        {
+            $push: {
+                watchHistory: videoId
+            }
+        },
+        { new: true }
+    )
+
     return res.status(200)
         .json(new ApiResponse(200, videoPage[0], "Video Page Data has been fetched"))
 })
@@ -595,8 +621,7 @@ export {
     updateVideoDetails,
     deleteVideo,
     togglePublishStatus,
-    getVideoById,
     getChannelVideos,
-    getHomeVideos,
+    getHomeAndSearchVideos, 
     playVideo,
 }

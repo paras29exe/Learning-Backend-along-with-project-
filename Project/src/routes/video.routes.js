@@ -4,9 +4,8 @@ import {
     updateVideoDetails,
     deleteVideo,
     togglePublishStatus,
-    getVideoById,
     getChannelVideos,
-    getHomeVideos,
+    getHomeAndSearchVideos,
     playVideo
 } from "../controllers/video.controller.js";
 
@@ -32,11 +31,9 @@ videoRouter.route("/delete-video/:videoId").delete(verifyJWT, deleteVideo)
 
 videoRouter.route("/toggle-publish-status/:videoId").patch(verifyJWT, togglePublishStatus)
 
-videoRouter.route("/get-video/:videoId").get(getVideoById)
-
 videoRouter.route("/get-channel-videos/:channelId").get(getChannelVideos)
 
-videoRouter.route("/get-home-videos").get(getHomeVideos)
+videoRouter.route("/get-videos").get(getHomeAndSearchVideos)
 
 videoRouter.route("/play-video/:videoId").get(playVideo)
 

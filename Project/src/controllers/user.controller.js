@@ -461,6 +461,61 @@ const getChannelById = asyncHandler(async (req, res) => {
         .json(new ApiResponse(200, channel[0], "Channel fetched successfully"));
 })
 
+const getWatchHistory = asyncHandler(async (req, res) => {
+    const userId = req.user._id;
+
+    const watchHistory = await User.aggregate([
+        {
+            $match: { _id: userId }
+        },
+        {
+            $lookup: {
+                from: "videos",
+                localField: "watchHistory",
+                foreignField: "_id",
+                as: "watchHistory",
+                pipeline: [
+                    {
+                        $lookup: {
+                            from: "users",
+                            localField: "ownerId",
+                            foreignField: "_id",
+                            as: "owner",
+                            pipeline: [
+                                {
+                                    $addFields: { channelName: "$fullName" }
+                                },
+                                {
+                                    $project: {
+                                        channelName: 1,
+                                        avatar: 1
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                ]
+            }
+        },
+        {
+            $unwind: "$watchHistory"
+        },
+        {
+            $replaceRoot: {
+                newRoot: "$watchHistory"
+            }
+        }
+    ])
+
+    if (watchHistory.length === 0) {
+        return res.status(200).json(new ApiResponse(204, {}, "No videos available in watch history."))
+    }
+
+    return res.status(200)
+        .json(new ApiResponse(200, watchHistory, "Watch history fetched successfully."));
+})
+
+
 const deleteAccount = asyncHandler(async (req, res) => {
     const userId = req.user._id;
     const session = await mongoose.startSession();
@@ -540,5 +595,6 @@ export {
     updateAvatar,
     updateCoverImage,
     getChannelById,
+    getWatchHistory,
     deleteAccount,
 }
