@@ -221,6 +221,7 @@ const getChannelVideos = asyncHandler(async (req, res) => {
 })
 
 const getHomeAndSearchVideos = asyncHandler(async (req, res) => {
+    // NOTE: First of all create a index in mongo db ATLAS for searching video based on query [ask to google or something]
     // validating if user is logged in or not
     const accessToken = req.cookies?.accessToken || req.header("Authorization")?.replace("Bearer ", "")
 
