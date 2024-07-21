@@ -9,6 +9,7 @@ app.use(cors({
     credentials: true
 }))
 
+// MIDDLEWARE - Plugins of express
 app.use(express.json({limit: "20kb"}))
 app.use(express.urlencoded({extended: true, limit: "20kb"}))
 app.use(express.static("public"))
@@ -24,7 +25,7 @@ import likeRouter from "./routes/like.routes.js";
 import dashboardRouter from "./routes/dashboard.routes.js";
 
 // using routes
-// we can't use app.get here because "routers" are in separate files and now we are routing in this file
+// we can't use app.get here because "controller functions" are in separate files and now we are routing in this file
 app.use("/api/v1/users", userRouter)
 app.use("/api/v1/videos", videoRouter)
 app.use("/api/v1/comments", commentRouter)

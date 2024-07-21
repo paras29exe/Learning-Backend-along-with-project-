@@ -17,10 +17,10 @@ userRouter.route("/register").post(upload.fields([
         maxCount: 1
     }
 ]),
-    asyncHandler(registerUser)
+    registerUser
 )
 
-userRouter.route("/login").post(asyncHandler(loginUser));
+userRouter.route("/login").post(loginUser);
 
 userRouter.route("/logout").post(verifyJWT, logoutUser);
 
