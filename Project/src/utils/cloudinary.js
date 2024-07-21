@@ -13,13 +13,15 @@ const fileUploadOnCloudinary = async (localFilePath) => {
 
     try {
         const result = await cloudinary.uploader.upload(localFilePath, { resource_type: "auto" });
-        fs.unlinkSync(localFilePath); // remove temporary file after upload to cloudinary completes
-
+        // remove temporary file after upload to cloudinary completes asynchronously
+        fs.unlink(localFilePath, () => {});
         return result.url;
 
     } catch (error) {
-
-        fs.unlinkSync(localFilePath) // remove temporary file as upload fails
+        // remove temporary file as upload fails
+        fs.unlink(localFilePath, (err, res) => {
+            console.log(`Error removing temp file: ${err}`);
+        })
         throw new Error("Cloudinary Error:: File Uploading Error :: ", error.message);
     }
 }
