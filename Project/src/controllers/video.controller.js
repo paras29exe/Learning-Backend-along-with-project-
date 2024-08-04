@@ -234,7 +234,7 @@ const getHomeAndSearchVideos = asyncHandler(async (req, res) => {
         }
     }
 
-    const { page = 1, limit = 30, sortBy, order="desc", query } = req.query;
+    const { page = 1, limit = 30, sortBy, order = "desc", query } = req.query;
 
     const sortOrder = (order === "desc") ? -1 : 1;
 
@@ -273,24 +273,40 @@ const getHomeAndSearchVideos = asyncHandler(async (req, res) => {
         )
     }
 
+    pipeline.push({
+        $project: {
+            title: 1,
+            thumbnail: 1,
+            publishStatus: 1,
+            views: 1,
+            ownerId: 1,
+            ownerChannelName: 1,
+            createdAt: 1
+        }
+    });
+
     const videos = await Video.aggregate(pipeline)
 
     const options = {
-        page : parseInt(page),
-        limit : parseInt(limit),
-        select : "title thumbnail publishStatus views ownerId ownerChannelName createdAt"
+        page: parseInt(page),
+        limit: parseInt(limit),
     }
 
-    if(sortBy && sortOrder ) {
-        options.sort = { [sortBy] : sortOrder }
+    if (sortBy && sortOrder) {
+        options.sort = { [sortBy]: sortOrder }
     }
 
-    const paginatedVideos = await Video.aggregatePaginate(videos, options)
+    try {
+        const paginatedVideos = await Video.aggregatePaginate(videos, options)
 
-    if (!paginatedVideos.length) return res.status(404).json(new ApiResponse(404, {}, "No videos available"))
+        if (!paginatedVideos.length) return res.status(404).json(new ApiResponse(404, {}, "No videos available"))
 
-    return res.status(200)
-        .json(new ApiResponse(200, paginatedVideos, "videos fetched successfully"));
+        return res.status(200)
+            .json(new ApiResponse(200, paginatedVideos, "videos fetched successfully"));
+    } catch (error) {
+        return res.status(500)
+        .json(new ApiResponse(500, {}, "An error occurred while fetching videos"))
+    }
 })
 
 const playVideo = asyncHandler(async (req, res) => {
@@ -623,6 +639,6 @@ export {
     deleteVideo,
     togglePublishStatus,
     getChannelVideos,
-    getHomeAndSearchVideos, 
+    getHomeAndSearchVideos,
     playVideo,
 }
