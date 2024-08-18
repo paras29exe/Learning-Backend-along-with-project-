@@ -35,12 +35,16 @@ const registerUser = asyncHandler(async (req, res, next) => {
     }
 
     // Check if email or username already exists in the database
-    const existedUser = await User.findOne({
-        $or: [{ email: email }, { username: username.toLowerCase() }]
-    })
+    const existedEmail = await User.findOne({email: email})
 
-    if (existedUser) {
-        throw new ApiError(409, "Email or username already exists")
+    if (existedEmail) {
+        throw new ApiError(409, "Email already registered")
+    }
+    
+    const existedUsername = await User.findOne({username: username.toLowerCase()})
+    
+    if (existedUsername) {
+        throw new ApiError(409, "Username not available")
     }
 
     // logics for avatar and cover image

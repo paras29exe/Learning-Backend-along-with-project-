@@ -34,4 +34,21 @@ app.use("/api/v1/subscriptions", subscriptionRouter)
 app.use("/api/v1/likes", likeRouter)
 app.use("/api/v1/dashboard", dashboardRouter)
 
+app.use((err, req, res, next) => {
+    if (err instanceof ApiError) {
+        res.status(err.statusCode).json({
+            success: err.success,
+            message: err.message,
+            errors: err.errors,
+        });
+    } else {
+        // Handle other errors (or create a default ApiError if you prefer)
+        res.status(500).json({
+            success: false,
+            message: 'An unexpected error occurred',
+        });
+    }
+});
+
+
 export {app}
