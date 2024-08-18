@@ -237,101 +237,61 @@ const updateAccountDetails = asyncHandler(async (req, res) => {
     // update them in database 
     // return the response
     const { fullName, email } = req.body
+    
+    const { avatar, coverImage } = req.files || {}
 
-    if (!fullName && !email) {
+    if (!fullName && !email && !avatar && !coverImage) {
         return res.status(400)
-            .json(new ApiResponse(400, {}, "No Changes have been made"))
+            .json(new ApiError(400, {}, "No Changes have been made by user"))
+    }
+    // storing the changed field to return in response by selecting the changed field
+    let avatarLink;
+    let coverImageLink;
 
-    } else {
-        // storing the changed field to return in response by selecting the changed field
-        const changes = (fullName && email) ? "fullName email" : fullName ? "fullName" : "email"
+    if (avatar) {
+        const avatarLocalPath = avatar[0].path
+        
+        avatarLink = await fileUploadOnCloudinary(avatarLocalPath)
 
-        const userAccount = await User.findByIdAndUpdate(req.user._id,
-            {
-                $set: {
-                    fullName: fullName || req.user.fullName,
-                    email: email || req.user.email
-                }
-            },
-            { new: true }
-        ).select(`-_id ${changes}`)
+        if (!avatarLink) {
+            throw new ApiError(500, "Failed to upload avatar on Cloudinary")
+        }
 
-        return res.status(200)
-            .json(new ApiResponse(200, userAccount, "Account details updated successfully!"))
+        if (req.user?.avatar) {
+            await deleteFileFromCloudinary(req.user.avatar)
+        }
     }
 
-})
-
-const updateAvatar = asyncHandler(async (req, res) => {
-    // take avatar file from user
-    // upload new avatar to cloudinary
-    // find the user and make changes in avatar in db
-    const avatarLocalPath = req.file?.path
-
-    if (!avatarLocalPath) {
-        throw new ApiError(400, "File was not given by user")
+    if (coverImage) {
+        const coverImageLocalPath = coverImage[0]?.path
+        
+        coverImageLink = await fileUploadOnCloudinary(coverImageLocalPath)
+        
+        if (!coverImageLink) {
+            throw new ApiError(500, "Failed to upload cover image on Cloudinary")
+        }
+        
+        if (req.user?.coverImage) {
+            await deleteFileFromCloudinary(req.user.coverImage)
+        }
     }
 
-    // fetching old avatar link from user object to delete it after uploading new one
-    const user = await User.findById(req.user?._id)
-    const oldAvatar = user.avatar
 
-    const avatar = await fileUploadOnCloudinary(avatarLocalPath)
-
-    if (!avatar) {
-        throw new ApiError(500, "Failed to upload avatar on Cloudinary")
-    }
-
-    const changes = await User.findByIdAndUpdate(req.user?._id,
+    const userAccount = await User.findByIdAndUpdate(req.user._id,
         {
             $set: {
-                avatar: avatar || req.user.avatar
+                fullName: fullName || req.user.fullName,
+                email: email || req.user.email,
+                avatar: avatarLink || req.user.avatar,
+                coverImage: coverImageLink || req.user.coverImage
             }
         },
         { new: true }
-    ).select("avatar")
-
-    // deleting old avatar
-    await deleteFileFromCloudinary(oldAvatar)
+    ).select(`username fullName email avatar coverImage`)
 
     return res.status(200)
-        .json(new ApiResponse(200, { Changes: changes }, "Avatar has been updated!"))
-})
+        .json(new ApiResponse(200, userAccount, "Account details updated successfully!"))
 
-const updateCoverImage = asyncHandler(async (req, res) => {
-    // take cover file from user
-    // upload new cover to cloudinary
-    // find the user and make changes in cover in db
-    const coverImageLocalPath = req.file && req.file.path
-
-    if (!coverImageLocalPath) {
-        throw new ApiError(400, "File was not given by user")
-    }
-
-    // fetching old cover image link from user object to delete it after uploading new one
-    const user = await User.findById(req.user?._id)
-    const oldCoverImage = user.coverImage
-
-    const coverImage = await fileUploadOnCloudinary(coverImageLocalPath)
-
-    if (!coverImage) {
-        throw new ApiError(500, "Failed to upload cover on Cloudinary")
-    }
-
-    const changes = await User.findByIdAndUpdate(req.user?._id,
-        {
-            $set: {
-                coverImage: coverImage || req.user.coverImage
-            }
-        },
-        { new: true }
-    ).select("coverImage")
-
-    // deleting old cover image
-    await deleteFileFromCloudinary(oldCoverImage)
-
-    return res.status(200)
-        .json(new ApiResponse(200, { Changes: changes }, "Cover image has been updated!"))
 })
 
 const getChannelById = asyncHandler(async (req, res) => {
@@ -596,8 +556,6 @@ export {
     changeCurrentPassword,
     getCurrentUser,
     updateAccountDetails,
-    updateAvatar,
-    updateCoverImage,
     getChannelById,
     getWatchHistory,
     deleteAccount,
