@@ -154,8 +154,60 @@ const subscribersList = asyncHandler(async (req, res) => {
         .json(new ApiResponse(200, subscribersList, "Subscribers fetched successfully"))
 })
 
+const subscribedVideos = asyncHandler(async (req, res) => {
+    // get userId and other sorting and pagination queries for displaying subscribed videos
+    // only logged user can access his subscribers list
+    // find all subscribed videos of the user
+    // return the response with the subscribed videos data
+    const { page = 1, limit = 30 } = req.query
+    const userId = req.user._id;
+
+    const videos = await Subscription.aggregate([
+        {
+            $match: { subscriber: userId }
+        },
+        {
+            $lookup: {
+                from: "videos",
+                localField: "subscriber",
+                foreignField: "ownerId",
+                as: "subscribedVideos",
+                pipeline: [
+                    {
+                        $match: { publishStatus: "public" }
+                    },
+                    {
+                        $project: {
+                            title: 1,
+                            thumbnail: 1,
+                            publishStatus: 1,
+                            views: 1,
+                            ownerId: 1,
+                            ownerChannelName: 1,
+                            createdAt: 1
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            $unwind: "$subscribedVideos"
+        },
+        {
+            $replaceRoot: { newRoot: "$subscribedVideos" }
+        },
+        { $sort: { createdAt: -1 } },
+        { $skip: (page - 1) * limit },
+        { $limit: parseInt(limit) }
+    ])
+
+return res.status(200)
+    .json(new ApiResponse(200, videos, "Subscribed videos fetched successfully"))
+})
+
 export {
     toggleSubscription,
     subscribedChannels,
     subscribersList,
+    subscribedVideos
 }

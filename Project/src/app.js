@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
+import { ApiError } from "./utils/apiError.js";
 
 const app = express()
 
@@ -37,6 +38,7 @@ app.use("/api/v1/dashboard", dashboardRouter)
 app.use((err, req, res, next) => {
     if (err instanceof ApiError) {
         res.status(err.statusCode).json({
+            status: err.statusCode,
             success: err.success,
             message: err.message,
             errors: err.errors,
@@ -49,6 +51,5 @@ app.use((err, req, res, next) => {
         });
     }
 });
-
 
 export {app}

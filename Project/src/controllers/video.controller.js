@@ -266,7 +266,7 @@ const getHomeAndSearchVideos = asyncHandler(async (req, res) => {
                     index: "search-videos",
                     text: {
                         query: query,
-                        path: ["title", "ownerUsername"], // search in title and ownerUsername fields
+                        path: ["title", "ownerChannelName"], // search in title and ownerUsername fields
                     }
                 }
             }
