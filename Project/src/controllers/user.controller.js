@@ -161,12 +161,11 @@ const logoutUser = asyncHandler(async (req, res) => {
 })
 
 const refreshTheTokens = asyncHandler(async (req, res, next) => {
-    try {
         // get the refresh token from cookies
-        const savedRefreshToken = req.cookies?.refreshToken || req.body?.refreshToken
-
+        const savedRefreshToken = req.cookies?.refreshToken || req.body?.refreshToken || false
+        
         if (!savedRefreshToken) {
-            throw new ApiError(401, "Access token is required")
+            throw new ApiError(404, "Refresh token not found! Please Login.")
         }
 
         // token is sent to user in encoded form so decode it first by comparing to get the user Id
@@ -189,10 +188,6 @@ const refreshTheTokens = asyncHandler(async (req, res, next) => {
             .cookie("accessToken", accessToken, options)
             .cookie("refreshToken", refreshToken, options)
             .json(new ApiResponse(200, { user: loggedUser, accessToken, newRefreshToken: refreshToken }, "Access token refreshed successfully"))
-
-    } catch (error) {
-        throw new ApiError("Failed to refresh access token", error)
-    }
 })
 
 const changeCurrentPassword = asyncHandler(async (req, res) => {

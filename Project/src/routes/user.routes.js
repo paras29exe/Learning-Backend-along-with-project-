@@ -23,7 +23,7 @@ userRouter.route("/login").post(loginUser);
 
 userRouter.route("/logout").post(verifyJWT, logoutUser);
 
-userRouter.route("/refresh-access-token").post(refreshTheTokens);
+userRouter.route("/refresh-the-tokens").post(refreshTheTokens);
 
 userRouter.route("/change-password").patch(verifyJWT, changeCurrentPassword);
 
