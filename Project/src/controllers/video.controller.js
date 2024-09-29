@@ -246,8 +246,6 @@ const getHomeAndSearchVideos = asyncHandler(async (req, res) => {
         if (decodedToken) {
             const user = await User.findById(decodedToken._id)
             req.user = user
-            console.log(user);
-            
         }
     }
 
