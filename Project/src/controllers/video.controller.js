@@ -4,6 +4,7 @@ import { ApiError } from "../utils/apiError.js";
 import { ApiResponse } from "../utils/apiResponse.js"
 import { Video } from "../models/video.model.js"
 import { User } from "../models/user.model.js";
+import jwt from "jsonwebtoken"
 import { deleteFileFromCloudinary, fileUploadOnCloudinary } from "../utils/cloudinary.js";
 
 // utility function to find owner and video document
@@ -32,49 +33,62 @@ const uploadVideo = asyncHandler(async (req, res) => {
     // save the video file and thumbnail file in temp folder then upload to cloudinary
     // save the details in the database as a Video model instance
     // return the response with the video data
+    try {
 
-    const { title, description } = req.body && req.body;
+        const { title, description } = req.body && req.body;
 
-    let thumbnailLocalPath
-    let videoLocalPath
+        let thumbnailLocalPath
+        let videoLocalPath
 
-    // checking whether the thumbnail was given or not
-    if (req.files && Array.isArray(req.files.thumbnail) && req.files.thumbnail.length > 0) {
-        thumbnailLocalPath = req.files.thumbnail[0].path
+        // checking whether the thumbnail was given or not
+        if (req.files && Array.isArray(req.files.thumbnail) && req.files.thumbnail.length > 0) {
+            thumbnailLocalPath = req.files.thumbnail[0].path
+        }
+
+        // checking whether the video file was given or not
+        if (req.files && Array.isArray(req.files.videoFile) && req.files.videoFile.length > 0) {
+            videoLocalPath = req.files.videoFile[0].path
+        }
+
+
+        if (!title && !description && !thumbnailLocalPath && !videoLocalPath) {
+            throw new ApiError(400, "All fields must be Provided");
+        }
+
+        const thumbnail = await fileUploadOnCloudinary(thumbnailLocalPath)
+        const videoFile = await fileUploadOnCloudinary(videoLocalPath)
+
+        if (!thumbnail && !videoFile) {
+            throw new ApiError(400, "Video Error :: File upload Failed")
+        }
+
+        const video = await Video.create({
+            title: String(title).trim(),
+            description: String(description).trim(),
+            thumbnail: thumbnail.url,
+            videoFile: videoFile.url,
+            duration: videoFile.duration,
+            ownerId: req.user._id,
+            ownerchannelId: req.user.channelId,
+            ownerChannelName: req.user.fullName,
+            ownerAvatar: req.user.avatar
+        })
+
+        const uploadedVideo = await Video.findById(video?._id)
+
+        return res.status(200)
+            .json(new ApiResponse(200, uploadedVideo, "Video uploaded successfully!"))
+
+    } catch (error) {
+        // Handle Multer file size error
+        if (error instanceof multer.MulterError && error.code === 'LIMIT_FILE_SIZE') {
+            return res.status(400)
+                .json(new ApiResponse(400, null, "File size exceeds the allowed limit of 50MB."));
+        }
+
+        // Handle other errors
+        next(error); // Pass the error to the global error handler
     }
-
-    // checking whether the video file was given or not
-    if (req.files && Array.isArray(req.files.videoFile) && req.files.videoFile.length > 0) {
-        videoLocalPath = req.files.videoFile[0].path
-    }
-
-
-    if (!title && !description && !thumbnailLocalPath && !videoLocalPath) {
-        throw new ApiError(400, "All fields must be given");
-    }
-
-    const thumbnail = await fileUploadOnCloudinary(thumbnailLocalPath)
-    const videoFile = await fileUploadOnCloudinary(videoLocalPath)
-
-    if (!thumbnail && !videoFile) {
-        throw new ApiError(400, "Video Error :: File upload Failed")
-    }
-
-    const video = await Video.create({
-        title: String(title).trim(),
-        description: String(description).trim(),
-        thumbnail,
-        videoFile,
-        ownerId: req.user._id,
-        ownerchannelId: req.user.channelId,
-        ownerChannelName: req.user.fullName,
-        ownerAvatar: req.user.avatar
-    })
-
-    const uploadedVideo = await Video.findById(video?._id)
-
-    return res.status(200)
-        .json(new ApiResponse(200, uploadedVideo, "Video uploaded successfully!"))
 })
 
 const updateVideoDetails = asyncHandler(async (req, res) => {
@@ -223,14 +237,17 @@ const getChannelVideos = asyncHandler(async (req, res) => {
 const getHomeAndSearchVideos = asyncHandler(async (req, res) => {
     // NOTE: First of all create a index in mongo db ATLAS for searching video based on query [ask to google or something]
     // validating if user is logged in or not
+    
     const accessToken = req.cookies?.accessToken || req.header("Authorization")?.replace("Bearer ", "")
 
     if (accessToken) {
         const decodedToken = jwt.verify(accessToken, process.env.ACCESS_TOKEN_SECRET)
-
+        
         if (decodedToken) {
             const user = await User.findById(decodedToken._id)
             req.user = user
+            console.log(user);
+            
         }
     }
 
@@ -241,10 +258,11 @@ const getHomeAndSearchVideos = asyncHandler(async (req, res) => {
     const pipeline = [];
 
     if (req.user) {
+        // console.log(req.user);
         pipeline.push(
             {
                 $match: {
-                    ownerId: req.user._id,
+                    ownerId: { $ne: req.user._id },
                     publishStatus: "public"
                 }
             }
@@ -280,12 +298,11 @@ const getHomeAndSearchVideos = asyncHandler(async (req, res) => {
             publishStatus: 1,
             views: 1,
             ownerId: 1,
+            ownerAvatar: 1,
             ownerChannelName: 1,
             createdAt: 1
         }
     });
-
-    const videos = await Video.aggregate(pipeline)
 
     const options = {
         page: parseInt(page),
@@ -296,17 +313,13 @@ const getHomeAndSearchVideos = asyncHandler(async (req, res) => {
         options.sort = { [sortBy]: sortOrder }
     }
 
-    try {
-        const paginatedVideos = await Video.aggregatePaginate(videos, options)
+    const paginatedVideos = await Video.aggregatePaginate(pipeline, options)
 
-        if (!paginatedVideos.length) return res.status(404).json(new ApiResponse(404, {}, "No videos available"))
+    if (paginatedVideos.totalDocs === 0) return res.status(404).json(new ApiResponse(404, {}, "No videos available"))
 
-        return res.status(200)
-            .json(new ApiResponse(200, paginatedVideos, "videos fetched successfully"));
-    } catch (error) {
-        return res.status(500)
-        .json(new ApiResponse(500, {}, "An error occurred while fetching videos"))
-    }
+    return res.status(200)
+        .json(new ApiResponse(200, paginatedVideos, "Videos fetched successfully"));
+
 })
 
 const playVideo = asyncHandler(async (req, res) => {

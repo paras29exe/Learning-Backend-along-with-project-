@@ -25,7 +25,6 @@ import subscriptionRouter from "./routes/subscription.routes.js";
 import likeRouter from "./routes/like.routes.js";
 import dashboardRouter from "./routes/dashboard.routes.js";
 
-// using routes
 // we can't use app.get here because "controller functions" are in separate files and now we are routing in this file
 app.use("/api/v1/users", userRouter)
 app.use("/api/v1/videos", videoRouter)

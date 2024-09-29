@@ -63,12 +63,14 @@ const registerUser = asyncHandler(async (req, res, next) => {
         console.log("coverImageLocalPath : Alert! You didn't provided a coverImage")
     }
 
-    const avatar = await fileUploadOnCloudinary(avatarLocalPath)
+    let avatar = await fileUploadOnCloudinary(avatarLocalPath)
+    avatar = avatar.url
 
     // as coverImage is not required necessary so we are handling it if it is given
     let coverImage;
     if (coverImageLocalPath) {
         coverImage = await fileUploadOnCloudinary(coverImageLocalPath)
+        coverImage = coverImage.url
     }
 
     /* it will create a new document in "users" named collection and if collection doesn't exists,
@@ -247,6 +249,7 @@ const updateAccountDetails = asyncHandler(async (req, res) => {
         const avatarLocalPath = avatar[0].path
         
         avatarLink = await fileUploadOnCloudinary(avatarLocalPath)
+        avatarLink = avatarLink.url
 
         if (!avatarLink) {
             throw new ApiError(500, "Failed to upload avatar on Cloudinary")
@@ -261,6 +264,7 @@ const updateAccountDetails = asyncHandler(async (req, res) => {
         const coverImageLocalPath = coverImage[0]?.path
         
         coverImageLink = await fileUploadOnCloudinary(coverImageLocalPath)
+        coverImageLink = coverImageLink.url
         
         if (!coverImageLink) {
             throw new ApiError(500, "Failed to upload cover image on Cloudinary")
@@ -473,7 +477,6 @@ const getWatchHistory = asyncHandler(async (req, res) => {
     return res.status(200)
         .json(new ApiResponse(200, watchHistory, "Watch history fetched successfully."));
 })
-
 
 const deleteAccount = asyncHandler(async (req, res) => {
     const userId = req.user._id;
