@@ -494,6 +494,7 @@ const playVideo = asyncHandler(async (req, res) => {
                                         _id: 1,
                                         channelId: 1,
                                         channelName: 1,
+                                        username: 1,
                                         avatar: 1,
                                         subscribersCount: 1,
                                         subscribedByViewer: 1
