@@ -19,7 +19,7 @@ const videoSchema = new Schema({
         required: true,
     },
     duration: {
-        type: Number, // fetch duration from video file    ***** TODO ******
+        type: String, // fetch duration from video file    ***** TODO ******
         // required: true,
     },
     views: {

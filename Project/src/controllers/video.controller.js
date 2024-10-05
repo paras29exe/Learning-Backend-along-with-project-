@@ -34,7 +34,8 @@ const uploadVideo = asyncHandler(async (req, res) => {
     // save the details in the database as a Video model instance
     // return the response with the video data
     try {
-
+        console.log(req.body);
+        
         const { title, description } = req.body && req.body;
 
         let thumbnailLocalPath
@@ -43,11 +44,15 @@ const uploadVideo = asyncHandler(async (req, res) => {
         // checking whether the thumbnail was given or not
         if (req.files && Array.isArray(req.files.thumbnail) && req.files.thumbnail.length > 0) {
             thumbnailLocalPath = req.files.thumbnail[0].path
+        }else {
+            throw new ApiError(400, "Thumbnail is required field")
         }
 
         // checking whether the video file was given or not
         if (req.files && Array.isArray(req.files.videoFile) && req.files.videoFile.length > 0) {
             videoLocalPath = req.files.videoFile[0].path
+        }else {
+            throw new ApiError(400, "Video file is required field")
         }
 
 
@@ -58,16 +63,23 @@ const uploadVideo = asyncHandler(async (req, res) => {
         const thumbnail = await fileUploadOnCloudinary(thumbnailLocalPath)
         const videoFile = await fileUploadOnCloudinary(videoLocalPath)
 
-        if (!thumbnail && !videoFile) {
+        if (!thumbnail || !videoFile) {
             throw new ApiError(400, "Video Error :: File upload Failed")
         }
+
+        const formattedDuration = (seconds) => {
+
+            const minutes = Math.floor(seconds / 60);
+            const secs = Math.floor(seconds % 60);
+            return `${minutes}:${secs < 10 ? "0" : ""}${secs}`;
+        };
 
         const video = await Video.create({
             title: String(title).trim(),
             description: String(description).trim(),
             thumbnail: thumbnail.url,
             videoFile: videoFile.url,
-            duration: videoFile.duration,
+            duration: formattedDuration(videoFile.duration),
             ownerId: req.user._id,
             ownerchannelId: req.user.channelId,
             ownerChannelName: req.user.fullName,
@@ -249,7 +261,7 @@ const getHomeAndSearchVideos = asyncHandler(async (req, res) => {
         }
     }
 
-    const { page = 1, limit = 30, sortBy, order = "desc", query } = req.query;
+    const { page = 1, limit = 30, sortBy="createdAt", order = "asc", query } = req.query;
 
     const sortOrder = (order === "desc") ? -1 : 1;
 
@@ -295,6 +307,7 @@ const getHomeAndSearchVideos = asyncHandler(async (req, res) => {
             thumbnail: 1,
             publishStatus: 1,
             views: 1,
+            duration: 1,
             ownerId: 1,
             ownerAvatar: 1,
             ownerChannelName: 1,
@@ -339,7 +352,7 @@ const playVideo = asyncHandler(async (req, res) => {
         }
     }
 
-    const { videoId } = req.params
+    const { videoId } = req.query
 
     if (!mongoose.Types.ObjectId.isValid(videoId)) {
         throw new ApiError(404, "Invalid Video Id provided")
@@ -568,7 +581,8 @@ const playVideo = asyncHandler(async (req, res) => {
                             likedByViewer: 1, //
                             ownerId: 1,
                             channelDetails: 1,
-                            comments: 1
+                            comments: 1,
+                            createdAt: 1
                         }
                     },
                 ],
@@ -602,8 +616,8 @@ const playVideo = asyncHandler(async (req, res) => {
                             _id: 1,
                             title: 1,
                             thumbnail: 1,
-                            videoFile: 1,
                             views: 1,
+                            duration: 1,
                             createdAt: 1,
                             channelName: 1,
                             channelAvatar: 1,

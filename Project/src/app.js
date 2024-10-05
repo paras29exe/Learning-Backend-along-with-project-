@@ -44,10 +44,8 @@ app.use((err, req, res, next) => {
         });
     } else {
         // Handle other errors (or create a default ApiError if you prefer)
-        res.status(500).json({
-            success: false,
-            message: 'An unexpected error occurred',
-        });
+        return res.status(500)
+        .json(new ApiError(500, err.message, err));
     }
 });
 

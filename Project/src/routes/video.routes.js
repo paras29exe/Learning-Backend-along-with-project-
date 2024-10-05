@@ -35,6 +35,6 @@ videoRouter.route("/get-channel-videos/:channelId").get(getChannelVideos)
 
 videoRouter.route("/get-videos").get(getHomeAndSearchVideos)
 
-videoRouter.route("/play-video/:videoId").get(playVideo)
+videoRouter.route("/play-video").get(playVideo)
 
 export default videoRouter;
