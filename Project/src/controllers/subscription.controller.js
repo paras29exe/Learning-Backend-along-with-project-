@@ -154,7 +154,7 @@ const subscribersList = asyncHandler(async (req, res) => {
         .json(new ApiResponse(200, subscribersList, "Subscribers fetched successfully"))
 })
 
-const subscribedVideos = asyncHandler(async (req, res) => {
+const subscribedChannelVideos = asyncHandler(async (req, res) => {
     // get userId and other sorting and pagination queries for displaying subscribed videos
     // only logged user can access his subscribers list
     // find all subscribed videos of the user
@@ -209,5 +209,5 @@ export {
     toggleSubscription,
     subscribedChannels,
     subscribersList,
-    subscribedVideos
+    subscribedChannelVideos
 }

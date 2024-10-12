@@ -35,7 +35,7 @@ const uploadVideo = asyncHandler(async (req, res) => {
     // return the response with the video data
     try {
         console.log(req.body);
-        
+
         const { title, description } = req.body && req.body;
 
         let thumbnailLocalPath
@@ -44,14 +44,14 @@ const uploadVideo = asyncHandler(async (req, res) => {
         // checking whether the thumbnail was given or not
         if (req.files && Array.isArray(req.files.thumbnail) && req.files.thumbnail.length > 0) {
             thumbnailLocalPath = req.files.thumbnail[0].path
-        }else {
+        } else {
             throw new ApiError(400, "Thumbnail is required field")
         }
 
         // checking whether the video file was given or not
         if (req.files && Array.isArray(req.files.videoFile) && req.files.videoFile.length > 0) {
             videoLocalPath = req.files.videoFile[0].path
-        }else {
+        } else {
             throw new ApiError(400, "Video file is required field")
         }
 
@@ -249,19 +249,19 @@ const getChannelVideos = asyncHandler(async (req, res) => {
 const getHomeAndSearchVideos = asyncHandler(async (req, res) => {
     // NOTE: First of all create a index in mongo db ATLAS for searching video based on query [ask to google or something]
     // validating if user is logged in or not
-    
+
     const accessToken = req.cookies?.accessToken || req.header("Authorization")?.replace("Bearer ", "")
 
     if (accessToken) {
         const decodedToken = jwt.verify(accessToken, process.env.ACCESS_TOKEN_SECRET)
-        
+
         if (decodedToken) {
             const user = await User.findById(decodedToken._id)
             req.user = user
         }
     }
 
-    const { page = 1, limit = 30, sortBy="createdAt", order = "asc", query } = req.query;
+    const { page = 1, limit = 30, sortBy = "createdAt", order = "asc", query } = req.query;
 
     const sortOrder = (order === "desc") ? -1 : 1;
 
@@ -367,6 +367,7 @@ const playVideo = asyncHandler(async (req, res) => {
         randomVideosQuery.ownerId = { $ne: req.user._id }
     }
 
+
     // refer to "src/reference/reference_for_playvideo_page.png" to know why we are collecting all this data
     const videoPage = await Video.aggregate([
         {
@@ -376,6 +377,7 @@ const playVideo = asyncHandler(async (req, res) => {
                         $match: {
                             _id: mongoose.Types.ObjectId.createFromHexString(videoId),
                             publishStatus: "public",
+                            ownerId: { $ne: req?.user?._id }
                         }
                     },
                     {
@@ -401,7 +403,7 @@ const playVideo = asyncHandler(async (req, res) => {
                             from: "likes",
                             let: {
                                 videoId: "$_id",
-                                viewer: req.user?.id
+                                viewer: req.user?._id
                             },
                             pipeline: [
                                 {
@@ -461,7 +463,7 @@ const playVideo = asyncHandler(async (req, res) => {
                                         from: "subscriptions",
                                         let: {
                                             channelId: "$_id",
-                                            viewer: req.user?.id
+                                            viewer: req.user?._id
                                         },
                                         pipeline: [
                                             {
@@ -579,6 +581,7 @@ const playVideo = asyncHandler(async (req, res) => {
                             videoFile: 1,
                             views: 1,
                             likesCount: 1,
+                            likedOrNot: 1,
                             likedByViewer: 1, //
                             ownerId: 1,
                             channelDetails: 1,
@@ -633,10 +636,9 @@ const playVideo = asyncHandler(async (req, res) => {
         }
     ])
 
-    if (Object.keys(videoPage[0].videoDetails).length === 0) {
-        throw new ApiError(404, "This video is private and cannot be played")
+    if (!videoPage[0]) {
+        throw new ApiError(404, "This video is private Or cannot be played")
     }
-
     // increasing video views count by 1
     await Video.updateOne({ _id: videoId },
         {
@@ -657,6 +659,7 @@ const playVideo = asyncHandler(async (req, res) => {
 
     return res.status(200)
         .json(new ApiResponse(200, videoPage[0], "Video Page Data has been fetched"))
+
 })
 
 export {
