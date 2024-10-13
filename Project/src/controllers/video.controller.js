@@ -302,6 +302,10 @@ const getHomeAndSearchVideos = asyncHandler(async (req, res) => {
     }
 
     pipeline.push({
+        $sample: { size: parseInt(limit) }
+    })
+
+    pipeline.push({
         $project: {
             title: 1,
             thumbnail: 1,
@@ -320,9 +324,9 @@ const getHomeAndSearchVideos = asyncHandler(async (req, res) => {
         limit: parseInt(limit),
     }
 
-    if (sortBy && sortOrder) {
-        options.sort = { [sortBy]: sortOrder }
-    }
+    // if (sortBy && sortOrder) {
+    //     options.sort = { [sortBy]: sortOrder }
+    // }
 
     const paginatedVideos = await Video.aggregatePaginate(pipeline, options)
 
@@ -508,7 +512,7 @@ const playVideo = asyncHandler(async (req, res) => {
                     {
                         $unwind: "$channelDetails",
                     },
-                    {
+                    /* {
                         $lookup: {
                             from: "comments",
                             localField: "_id",
@@ -539,7 +543,7 @@ const playVideo = asyncHandler(async (req, res) => {
                                         from: "likes",
                                         let: {
                                             commentId: "$_id",
-                                            viewer: req.user?.id
+                                            viewer: req.user?._id
                                         },
                                         pipeline: [
                                             {
@@ -571,7 +575,7 @@ const playVideo = asyncHandler(async (req, res) => {
 
                             ]
                         }
-                    },
+                    },*/
                     {
                         $project: {
                             _id: 1,
@@ -581,11 +585,10 @@ const playVideo = asyncHandler(async (req, res) => {
                             videoFile: 1,
                             views: 1,
                             likesCount: 1,
-                            likedOrNot: 1,
                             likedByViewer: 1, //
                             ownerId: 1,
                             channelDetails: 1,
-                            comments: 1,
+                            // comments: 1,
                             createdAt: 1
                         }
                     },

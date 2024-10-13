@@ -1,4 +1,6 @@
 import { Comment } from "../models/comment.model.js"
+import { User } from "../models/user.model.js"
+import jwt from "jsonwebtoken"
 import { asyncHandler } from "../utils/asyncHandler.js"
 import { ApiError } from "../utils/apiError.js"
 import { ApiResponse } from "../utils/apiResponse.js"
@@ -49,7 +51,7 @@ const addComment = asyncHandler(async (req, res) => {
 
     const newComment = await Comment.create({
         content: String(content),
-        videoId: videoId,
+        videoId: mongoose.Types.ObjectId.createFromHexString(videoId),
         ownerId: req.user._id,
         ownerUsername: req.user.username,
         ownerAvatar: req.user.avatar,
@@ -66,13 +68,89 @@ const getComments = asyncHandler(async (req, res) => {
     // get user from middleware of verifyJWT
     // fetch all comments for the given video
     // return comments with their details
+    const accessToken = req.cookies?.accessToken || req.header("Authorization")?.replace("Bearer ", "")
+
+    if (accessToken) {
+        const decodedToken = jwt.verify(accessToken, process.env.ACCESS_TOKEN_SECRET)
+
+        if (decodedToken) {
+            const user = await User.findById(decodedToken._id)
+            req.user = user
+        }
+    }
+    
     const { videoId } = req.params
 
     if (!mongoose.Types.ObjectId.isValid(videoId)) {
         throw new ApiError(404, "Invalid Video Id provided")
     }
 
-    const comments = await Comment.find({ videoId})
+    const comments = await Comment.aggregate([
+        {
+            $match: {
+                videoId: mongoose.Types.ObjectId.createFromHexString(videoId)
+            }
+        },
+        {
+            $sort: {
+                createdAt: -1
+            }
+        },
+        {
+            $lookup: {
+                from: "likes",
+                localField: "_id",
+                foreignField: "comment",
+                as: "likesOnComment"
+            }
+        },
+        {
+            $addFields: {
+                likesCount: { $size: "$likesOnComment" }
+            }
+        },
+        {
+            $lookup: {
+                from: "likes",
+                let: {
+                    commentId: "$_id",
+                    viewer: req.user?._id
+                },
+                pipeline: [
+                    {
+                        $match: {
+                            $expr: {
+                                $and: [
+                                    { $eq: ["$comment", "$$commentId"] },
+                                    { $eq: ["$likedBy", "$$viewer"] }
+                                ]
+                            }
+                        }
+                    },
+                ],
+                as: "likedByViewer"
+            }
+        },
+        {
+            $project: {
+                content: 1,
+                ownerAvatar: 1,
+                ownerId: 1,
+                ownerUsername: 1,
+                createdAt: 1,
+                owner: 1,
+                likesCount: 1,
+                likesOnComment: 1,
+                likedByViewer: {
+                    $cond: [
+                        { $eq: [{ $size: "$likedByViewer" }, 1] },
+                        true,
+                        false
+                    ]
+                },
+            }
+        }
+    ])
 
     if (!comments) throw new ApiError(500, "Error getting comments")
 
@@ -132,12 +210,12 @@ const deleteComment = asyncHandler(async (req, res) => {
         throw new ApiError(403, "Unauthorized to delete this comment")
     }
 
-    const deleted = await Comment.deleteOne({_id: comment._id}, {secure : true})
+    const deleted = await Comment.deleteOne({ _id: comment._id }, { secure: true })
 
     if (!deleted) throw new ApiError(500, "Error while deleting comment")
 
     return res.status(200)
-        .json(new ApiResponse(200, { comment: "Removed"}, "Comment Deleted Successfully"))
+        .json(new ApiResponse(200, { comment: "Removed" }, "Comment Deleted Successfully"))
 })
 
 export {
