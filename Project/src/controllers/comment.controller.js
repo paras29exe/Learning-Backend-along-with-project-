@@ -25,8 +25,7 @@ async function findOwnerOfComment(req) {
     const comment = await Comment.findById(commentId)
 
     // extracting the owner of video doc and its owner id in string
-    const commentOwner = comment.owner.toString()
-
+    const commentOwner = comment.ownerId.toString()
     return { comment, commentOwner }
 }
 
@@ -78,7 +77,7 @@ const getComments = asyncHandler(async (req, res) => {
             req.user = user
         }
     }
-    
+
     const { videoId } = req.params
 
     if (!mongoose.Types.ObjectId.isValid(videoId)) {
@@ -204,18 +203,22 @@ const deleteComment = asyncHandler(async (req, res) => {
     // delete the comment from the database
     // return success message
 
+    console.log("Comment deleted successfully")
     const { comment, commentOwner } = await findOwnerOfComment(req)
 
     if (commentOwner !== req.user._id.toString()) {
         throw new ApiError(403, "Unauthorized to delete this comment")
     }
+    try {
+        const deleted = await Comment.deleteOne({ _id: comment?._id }, { secure: true })
 
-    const deleted = await Comment.deleteOne({ _id: comment._id }, { secure: true })
+        if (!deleted) throw new ApiError(500, "Error while deleting comment")
 
-    if (!deleted) throw new ApiError(500, "Error while deleting comment")
-
-    return res.status(200)
-        .json(new ApiResponse(200, { comment: "Removed" }, "Comment Deleted Successfully"))
+        return res.status(200)
+            .json(new ApiResponse(200, {deleted: comment._id}, "Comment Deleted Successfully"))
+    } catch (error) {
+        console.log(error)
+    }
 })
 
 export {
