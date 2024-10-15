@@ -4,6 +4,8 @@ import { ApiError } from "../utils/apiError.js";
 import { ApiResponse } from "../utils/apiResponse.js"
 import { Video } from "../models/video.model.js"
 import { User } from "../models/user.model.js";
+import { Like } from "../models/like.model.js";
+import { Comment } from "../models/comment.model.js";
 import jwt from "jsonwebtoken"
 import { deleteFileFromCloudinary, fileUploadOnCloudinary } from "../utils/cloudinary.js";
 
@@ -34,7 +36,6 @@ const uploadVideo = asyncHandler(async (req, res) => {
     // save the details in the database as a Video model instance
     // return the response with the video data
     try {
-        console.log(req.body);
 
         const { title, description } = req.body && req.body;
 
@@ -85,6 +86,8 @@ const uploadVideo = asyncHandler(async (req, res) => {
             ownerChannelName: req.user.fullName,
             ownerAvatar: req.user.avatar
         })
+
+        if(!video) console.log("Error creating video")
 
         const uploadedVideo = await Video.findById(video?._id)
 
@@ -172,8 +175,15 @@ const deleteVideo = asyncHandler(async (req, res) => {
 
     // now the user is authenticated to delete the video
     const deleted = await Video.deleteOne(video._id, { secure: true })
+    const deletedLikes = await Like.deleteMany({video: video._id})
 
-    if (!deleted) {
+    const comments = await Comment.find({videoId: video._id})
+    const commentIds = comments.map((comment) => comment._id)
+    const deletedCommentLikes = await Like.deleteMany({ comment: { $in: commentIds } });
+
+    const deletedComments = await Comment.deleteMany({videoId: video._id})    
+
+    if (!deleted || !deletedLikes || !deletedCommentLikes || !deletedComments) {
         throw new ApiError(500, "Video Deletion failed! Try again later")
     }
 

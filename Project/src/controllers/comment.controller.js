@@ -1,5 +1,6 @@
 import { Comment } from "../models/comment.model.js"
 import { User } from "../models/user.model.js"
+import { Like } from "../models/like.model.js"
 import jwt from "jsonwebtoken"
 import { asyncHandler } from "../utils/asyncHandler.js"
 import { ApiError } from "../utils/apiError.js"
@@ -203,7 +204,6 @@ const deleteComment = asyncHandler(async (req, res) => {
     // delete the comment from the database
     // return success message
 
-    console.log("Comment deleted successfully")
     const { comment, commentOwner } = await findOwnerOfComment(req)
 
     if (commentOwner !== req.user._id.toString()) {
@@ -211,8 +211,9 @@ const deleteComment = asyncHandler(async (req, res) => {
     }
     try {
         const deleted = await Comment.deleteOne({ _id: comment?._id }, { secure: true })
+        const deletedLikes = await Like.deleteMany({ comment: comment?._id})
 
-        if (!deleted) throw new ApiError(500, "Error while deleting comment")
+        if (!deleted || !deletedLikes) throw new ApiError(500, "Error while deleting comment")
 
         return res.status(200)
             .json(new ApiResponse(200, {deleted: comment._id}, "Comment Deleted Successfully"))
