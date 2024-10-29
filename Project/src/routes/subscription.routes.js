@@ -10,6 +10,6 @@ subscriptionRouter.route("/subscribed-channels/current-user").get(verifyJWT, sub
 
 subscriptionRouter.route("/subscribers-list/current-user").get(verifyJWT, subscribersList);
 
-subscriptionRouter.route("/subscribed-channel-videos/current-user").get(verifyJWT, subscribedChannelVideos);
+subscriptionRouter.route("/subscribed-channel-videos").get(verifyJWT, subscribedChannelVideos);
 
 export default subscriptionRouter;

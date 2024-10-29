@@ -30,21 +30,17 @@ const registerUser = asyncHandler(async (req, res, next) => {
 
     if (!fullName || !email || !username || !password) throw new ApiError(404, "All fields are required")
 
-    if (!email.trim().includes("@")) {
-        throw new ApiError(400, "Invalid email")
-    }
-
     // Check if email or username already exists in the database
     const existedEmail = await User.findOne({email: email})
 
     if (existedEmail) {
-        throw new ApiError(409, "Email already registered")
+        throw new ApiError(409, "Email already registered", "email")
     }
     
     const existedUsername = await User.findOne({username: username.toLowerCase()})
     
     if (existedUsername) {
-        throw new ApiError(409, "Username not available")
+        throw new ApiError(409, "Username not available", "username")
     }
 
     // logics for avatar and cover image
@@ -54,7 +50,7 @@ const registerUser = asyncHandler(async (req, res, next) => {
     if (req.files && Array.isArray(req.files.avatar) && req.files.avatar.length > 0) {
         avatarLocalPath = req.files.avatar[0].path
     } else {
-        throw new ApiError(400, "Avatar is required field")
+        throw new ApiError(400, "Avatar is required field", "avatar")
     }
 
     if (req.files && Array.isArray(req.files.coverImage) && req.files.coverImage.length > 0) {
@@ -92,7 +88,6 @@ const registerUser = asyncHandler(async (req, res, next) => {
     }
 
     loginUser({ body: { username, password: String(password) } }, res, next)
-
 })
 
 const loginUser = asyncHandler(async (req, res, next) => {
@@ -106,7 +101,7 @@ const loginUser = asyncHandler(async (req, res, next) => {
     const { username, password } = req.body
 
     if (!username) {
-        throw new ApiError(400, "Username or email is required")
+        throw new ApiError(400, "Username or email is required", "username")
     }
 
     const user = await User.findOne({
@@ -115,13 +110,13 @@ const loginUser = asyncHandler(async (req, res, next) => {
     })
 
     if (!user) {
-        throw new ApiError(401, "Username or Email not found")
+        throw new ApiError(401, "Username or Email not found", "username")
     }
 
     const isPassValid = await user.isPasswordCorrect(String(password))
 
     if (!isPassValid) {
-        throw new ApiError(401, "Invalid Password")
+        throw new ApiError(401, "Invalid Password", "password")
     }
 
     const { accessToken, refreshToken } = await generateAccessAndRefreshToken(user._id)

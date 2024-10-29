@@ -162,7 +162,7 @@ const subscribedChannelVideos = asyncHandler(async (req, res) => {
     const { page = 1, limit = 30 } = req.query
     const userId = req.user._id;
 
-    const videos = await Subscription.aggregate([
+    const videos = await Subscription.aggregatePaginate([
         {
             $match: { subscriber: userId }
         },
@@ -182,6 +182,8 @@ const subscribedChannelVideos = asyncHandler(async (req, res) => {
                             thumbnail: 1,
                             publishStatus: 1,
                             views: 1,
+                            duration: 1,
+                            ownerAvatar: 1,
                             ownerId: 1,
                             ownerChannelName: 1,
                             createdAt: 1
@@ -196,13 +198,17 @@ const subscribedChannelVideos = asyncHandler(async (req, res) => {
         {
             $replaceRoot: { newRoot: "$subscribedVideos" }
         },
-        { $sort: { createdAt: -1 } },
-        { $skip: (page - 1) * limit },
-        { $limit: parseInt(limit) }
-    ])
 
-return res.status(200)
-    .json(new ApiResponse(200, videos, "Subscribed videos fetched successfully"))
+    ],
+        [
+            { $sort: { createdAt: -1 } },
+            { $skip: (page - 1) * limit },
+            { $limit: parseInt(limit) }
+        ]
+    )
+
+    return res.status(200)
+        .json(new ApiResponse(200, videos, "Subscribed videos fetched successfully"))
 })
 
 export {

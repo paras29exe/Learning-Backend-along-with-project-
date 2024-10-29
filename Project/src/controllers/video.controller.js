@@ -46,14 +46,14 @@ const uploadVideo = asyncHandler(async (req, res) => {
         if (req.files && Array.isArray(req.files.thumbnail) && req.files.thumbnail.length > 0) {
             thumbnailLocalPath = req.files.thumbnail[0].path
         } else {
-            throw new ApiError(400, "Thumbnail is required field")
+            throw new ApiError(400, "Thumbnail is required field", "thumbnail")
         }
 
         // checking whether the video file was given or not
         if (req.files && Array.isArray(req.files.videoFile) && req.files.videoFile.length > 0) {
             videoLocalPath = req.files.videoFile[0].path
         } else {
-            throw new ApiError(400, "Video file is required field")
+            throw new ApiError(400, "Video file is required field", "videoFile")
         }
 
 
@@ -65,7 +65,7 @@ const uploadVideo = asyncHandler(async (req, res) => {
         const videoFile = await fileUploadOnCloudinary(videoLocalPath)
 
         if (!thumbnail || !videoFile) {
-            throw new ApiError(400, "Video Error :: File upload Failed")
+            throw new ApiError(400, "Video Error :: File upload Failed" , "videoFile")
         }
 
         const formattedDuration = (seconds) => {
@@ -98,7 +98,7 @@ const uploadVideo = asyncHandler(async (req, res) => {
         // Handle Multer file size error
         if (error instanceof multer.MulterError && error.code === 'LIMIT_FILE_SIZE') {
             return res.status(400)
-                .json(new ApiResponse(400, null, "File size exceeds the allowed limit of 50MB."));
+                .json(new ApiResponse(400, null, "File size exceeds the allowed limit of 50MB.", videoFile));
         }
 
         // Handle other errors
@@ -662,6 +662,11 @@ const playVideo = asyncHandler(async (req, res) => {
 
     // adding it to users watch History 
     await User.findByIdAndUpdate(req.user?._id,
+        {
+            $pull: {
+                watchHistory: videoId 
+            }
+        },
         {
             $push: {
                 watchHistory: videoId
