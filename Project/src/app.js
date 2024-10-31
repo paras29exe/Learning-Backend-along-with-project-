@@ -36,7 +36,7 @@ app.use("/api/v1/dashboard", dashboardRouter)
 
 app.use((err, req, res, next) => {
     if (err instanceof ApiError) {
-        res.status(err.statusCode).json({
+        return res.status(err.statusCode).json({
             status: err.statusCode,
             success: err.success,
             message: err.message,

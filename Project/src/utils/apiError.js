@@ -1,15 +1,15 @@
 class ApiError extends Error {
     constructor(
         statusCode,
-        message = "Something went wrong",
+        message = null,
         source = null,
         errors = [],
         stack = [],
     ){
-        super(message);
+        super();
         this.statusCode = statusCode;
-        this.data = null;
         this.message = message;
+        this.data = null;
         this.source = source;
         this.success = false;
         this.errors = (errors.length > 0)? errors : Error;

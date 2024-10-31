@@ -340,8 +340,6 @@ const getHomeAndSearchVideos = asyncHandler(async (req, res) => {
 
     const paginatedVideos = await Video.aggregatePaginate(pipeline, options)
 
-    if (paginatedVideos.totalDocs === 0) return res.status(404).json(new ApiResponse(404, {}, "No videos available"))
-
     return res.status(200)
         .json(new ApiResponse(200, paginatedVideos, "Videos fetched successfully"));
 

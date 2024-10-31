@@ -6,6 +6,7 @@ import { fileUploadOnCloudinary, deleteFileFromCloudinary } from "../utils/cloud
 import { ApiResponse } from "../utils/apiResponse.js"
 import jwt from "jsonwebtoken"
 import mongoose from "mongoose"
+import fs from "fs"
 
 const generateAccessAndRefreshToken = async (userId) => {
     // try catch 
@@ -26,68 +27,68 @@ const generateAccessAndRefreshToken = async (userId) => {
 }
 
 const registerUser = asyncHandler(async (req, res, next) => {
+
+    const avatarLocalPath = req.files?.avatar?.[0].path
+    const coverImageLocalPath = req.files.coverImage?.[0].path
+
     const { fullName, email, username, password } = req.body
+    try {
 
-    if (!fullName || !email || !username || !password) throw new ApiError(404, "All fields are required")
+        if (!fullName || !email || !username || !password) throw new ApiError(404, "All fields are required")
 
-    // Check if email or username already exists in the database
-    const existedEmail = await User.findOne({email: email})
+        // Check if email or username already exists in the database
+        const existedEmail = await User.findOne({ email: email })
 
-    if (existedEmail) {
-        throw new ApiError(409, "Email already registered", "email")
+        if (existedEmail) {
+            throw new ApiError(409, "Email already registered", "email")
+        }
+
+        const existedUsername = await User.findOne({ username: username.toLowerCase() })
+
+        if (existedUsername) {
+            throw new ApiError(409, "Username not available", "username")
+        }
+
+        // logics for avatar and cover image
+
+        if(!avatarLocalPath) throw new ApiError(400, "Avatar is required field", "avatar")
+
+        if(!coverImageLocalPath) console.log("coverImageLocalPath : Alert! You didn't provided a coverImage")
+
+        let avatar = await fileUploadOnCloudinary(avatarLocalPath)
+        avatar = avatar.url
+
+        // as coverImage is not required necessary so we are handling it if it is given
+        let coverImage;
+        if (coverImageLocalPath) {
+            coverImage = await fileUploadOnCloudinary(coverImageLocalPath)
+            coverImage = coverImage.url
+        }
+
+        /* it will create a new document in "users" named collection and if collection doesn't exists,
+          it will create a collection first with the name of model created in user.model.js */
+
+        const user = await User.create({
+            fullName,
+            email,
+            username: username.toLowerCase(),
+            password: String(password),
+            avatar,
+            coverImage: coverImage || ""
+        })
+
+        const createdUser = await User.findById(user._id)
+
+        if (!createdUser) {
+            throw new ApiError(500, "Something went wrong while creating user")
+        }
+
+        loginUser({ body: { username, password: String(password) } }, res, next)
+    } catch (error) {
+        avatarLocalPath && fs.unlink(avatarLocalPath, () => {})
+        coverImageLocalPath && fs.unlink(coverImageLocalPath, () => {})
+        throw error
     }
-    
-    const existedUsername = await User.findOne({username: username.toLowerCase()})
-    
-    if (existedUsername) {
-        throw new ApiError(409, "Username not available", "username")
-    }
-
-    // logics for avatar and cover image
-    let avatarLocalPath;
-    let coverImageLocalPath;
-
-    if (req.files && Array.isArray(req.files.avatar) && req.files.avatar.length > 0) {
-        avatarLocalPath = req.files.avatar[0].path
-    } else {
-        throw new ApiError(400, "Avatar is required field", "avatar")
-    }
-
-    if (req.files && Array.isArray(req.files.coverImage) && req.files.coverImage.length > 0) {
-        coverImageLocalPath = req.files.coverImage[0].path
-    } else {
-        console.log("coverImageLocalPath : Alert! You didn't provided a coverImage")
-    }
-
-    let avatar = await fileUploadOnCloudinary(avatarLocalPath)
-    avatar = avatar.url
-
-    // as coverImage is not required necessary so we are handling it if it is given
-    let coverImage;
-    if (coverImageLocalPath) {
-        coverImage = await fileUploadOnCloudinary(coverImageLocalPath)
-        coverImage = coverImage.url
-    }
-
-    /* it will create a new document in "users" named collection and if collection doesn't exists,
-      it will create a collection first with the name of model created in user.model.js */
-
-    const user = await User.create({
-        fullName,
-        email,
-        username: username.toLowerCase(),
-        password: String(password),
-        avatar,
-        coverImage: coverImage || ""
-    })
-
-    const createdUser = await User.findById(user._id)
-
-    if (!createdUser) {
-        throw new ApiError(500, "Something went wrong while creating user")
-    }
-
-    loginUser({ body: { username, password: String(password) } }, res, next)
 })
 
 const loginUser = asyncHandler(async (req, res, next) => {
@@ -106,7 +107,7 @@ const loginUser = asyncHandler(async (req, res, next) => {
 
     const user = await User.findOne({
         // "$or" return true if any one or more item is found
-        $or: [{ username: username }, { email:username }]
+        $or: [{ username: username }, { email: username }]
     })
 
     if (!user) {
@@ -158,33 +159,33 @@ const logoutUser = asyncHandler(async (req, res) => {
 })
 
 const refreshTheTokens = asyncHandler(async (req, res, next) => {
-        // get the refresh token from cookies
-        const savedRefreshToken = req.cookies?.refreshToken || req.body?.refreshToken || false
-        
-        if (!savedRefreshToken) {
-            throw new ApiError(404, "Refresh token not found! Please Login.")
-        }
+    // get the refresh token from cookies
+    const savedRefreshToken = req.cookies?.refreshToken || req.body?.refreshToken || false
 
-        // token is sent to user in encoded form so decode it first by comparing to get the user Id
-        const decodedToken = jwt.verify(savedRefreshToken, process.env.REFRESH_TOKEN_SECRET)
+    if (!savedRefreshToken) {
+        throw new ApiError(404, "Refresh token not found! Please Login.", "Refresh token")
+    }
 
-        const loggedUser = await User.findById(decodedToken._id)
+    // token is sent to user in encoded form so decode it first by comparing to get the user Id
+    const decodedToken = jwt.verify(savedRefreshToken, process.env.REFRESH_TOKEN_SECRET)
 
-        if (savedRefreshToken !== loggedUser.refreshToken) {
-            throw new ApiError(401, "Access token is expired")
-        }
+    const loggedUser = await User.findById(decodedToken._id)
 
-        const options = {
-            httpOnly: true,
-            secure: true,
-        }
+    if (savedRefreshToken !== loggedUser.refreshToken) {
+        throw new ApiError(401, "Access token is expired")
+    }
 
-        const { accessToken, refreshToken } = await generateAccessAndRefreshToken(loggedUser._id)
+    const options = {
+        httpOnly: true,
+        secure: true,
+    }
 
-        return res.status(200)
-            .cookie("accessToken", accessToken, options)
-            .cookie("refreshToken", refreshToken, options)
-            .json(new ApiResponse(200, { user: loggedUser, accessToken, newRefreshToken: refreshToken }, "Access token refreshed successfully"))
+    const { accessToken, refreshToken } = await generateAccessAndRefreshToken(loggedUser._id)
+
+    return res.status(200)
+        .cookie("accessToken", accessToken, options)
+        .cookie("refreshToken", refreshToken, options)
+        .json(new ApiResponse(200, { user: loggedUser, accessToken, newRefreshToken: refreshToken }, "Access token refreshed successfully"))
 })
 
 const changeCurrentPassword = asyncHandler(async (req, res) => {
@@ -229,7 +230,7 @@ const updateAccountDetails = asyncHandler(async (req, res) => {
     // update them in database 
     // return the response
     const { fullName, email } = req.body
-    
+
     const { avatar, coverImage } = req.files || {}
 
     if (!fullName && !email && !avatar && !coverImage) {
@@ -242,7 +243,7 @@ const updateAccountDetails = asyncHandler(async (req, res) => {
 
     if (avatar) {
         const avatarLocalPath = avatar[0].path
-        
+
         avatarLink = await fileUploadOnCloudinary(avatarLocalPath)
         avatarLink = avatarLink.url
 
@@ -257,14 +258,14 @@ const updateAccountDetails = asyncHandler(async (req, res) => {
 
     if (coverImage) {
         const coverImageLocalPath = coverImage[0]?.path
-        
+
         coverImageLink = await fileUploadOnCloudinary(coverImageLocalPath)
         coverImageLink = coverImageLink.url
-        
+
         if (!coverImageLink) {
             throw new ApiError(500, "Failed to upload cover image on Cloudinary")
         }
-        
+
         if (req.user?.coverImage) {
             await deleteFileFromCloudinary(req.user.coverImage)
         }
