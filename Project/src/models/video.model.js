@@ -35,6 +35,11 @@ const videoSchema = new Schema({
         ref: "User",
         required: true
     },
+    ownerUsername: {
+        type: String,
+        ref: "User",
+        required: true,
+    },
     ownerChannelName: {
         type: String,
         ref: "User"

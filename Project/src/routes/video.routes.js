@@ -31,7 +31,7 @@ videoRouter.route("/delete-video/:videoId").delete(verifyJWT, deleteVideo)
 
 videoRouter.route("/toggle-publish-status/:videoId").patch(verifyJWT, togglePublishStatus)
 
-videoRouter.route("/get-channel-videos/:channelId").get(getChannelVideos)
+videoRouter.route("/get-channel-videos/:username").get(getChannelVideos)
 
 videoRouter.route("/get-videos").get(getHomeAndSearchVideos)
 

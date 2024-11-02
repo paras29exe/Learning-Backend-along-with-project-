@@ -51,9 +51,9 @@ const registerUser = asyncHandler(async (req, res, next) => {
 
         // logics for avatar and cover image
 
-        if(!avatarLocalPath) throw new ApiError(400, "Avatar is required field", "avatar")
+        if (!avatarLocalPath) throw new ApiError(400, "Avatar is required field", "avatar")
 
-        if(!coverImageLocalPath) console.log("coverImageLocalPath : Alert! You didn't provided a coverImage")
+        if (!coverImageLocalPath) console.log("coverImageLocalPath : Alert! You didn't provided a coverImage")
 
         let avatar = await fileUploadOnCloudinary(avatarLocalPath)
         avatar = avatar.url
@@ -85,8 +85,8 @@ const registerUser = asyncHandler(async (req, res, next) => {
 
         loginUser({ body: { username, password: String(password) } }, res, next)
     } catch (error) {
-        avatarLocalPath && fs.unlink(avatarLocalPath, () => {})
-        coverImageLocalPath && fs.unlink(coverImageLocalPath, () => {})
+        avatarLocalPath && fs.unlink(avatarLocalPath, () => { })
+        coverImageLocalPath && fs.unlink(coverImageLocalPath, () => { })
         throw error
     }
 })
@@ -302,15 +302,18 @@ const getChannelById = asyncHandler(async (req, res) => {
     }
 
     const { page = 1, limit = 24 } = req.query
-    const { channelId } = req.params
+    const { username } = req.params
+    // console.log(username);
 
-    if (!mongoose.isValidObjectId(channelId)) throw new ApiError(400, "Invalid Channel ID provided")
+
+    // if (!mongoose.isValidObjectId(username)) throw new ApiError(400, "Invalid Channel ID provided")
+
 
     const channel = await User.aggregate([
         {
             $facet: {
                 channelDetails: [
-                    { $match: { _id: mongoose.Types.ObjectId.createFromHexString(channelId) } },
+                    { $match: { username: username } },
                     { $addFields: { channelName: "$fullName" } },
                     // finding no. of documents in subscription collection that has his ID in "channel" field
                     {
@@ -361,31 +364,48 @@ const getChannelById = asyncHandler(async (req, res) => {
                         }
                     },
                     {
+                        $lookup: {
+                            from: "videos",
+                            localField: "_id",
+                            foreignField: "ownerId",
+                            as: "totalVideos"
+                        }
+                    },
+                    {
+                        $addFields: {
+                            totalVideos: { $size: "$totalVideos" }
+                        }
+                    },
+                    {
                         $project: {
                             fullName: 0,
                             email: 0,
                             password: 0,
                             __v: 0,
                             refreshToken: 0,
+                            accessToken: 0,
                             watchHistory: 0,
                             updatedAt: 0
                         }
                     }
 
                 ],
-                videos: [
+                popularVideos: [
                     {
-                        $match: { _id: mongoose.Types.ObjectId.createFromHexString(channelId) },
+                        $match: { username: username },
                     },
                     {
                         $lookup: {
                             from: "videos",
                             localField: "_id",
                             foreignField: "ownerId",
-                            as: "videos",
+                            as: "popularVideos",
                             pipeline: [
                                 {
                                     $sort: { "views": -1 }
+                                },
+                                {
+                                    $limit: 5
                                 },
                                 {
                                     $project: {
@@ -400,10 +420,41 @@ const getChannelById = asyncHandler(async (req, res) => {
                             ]
                         }
                     },
-                    { $unwind: "$videos" },
-                    { $replaceRoot: { newRoot: "$videos" } },
-                    { $skip: (page - 1) * parseInt(limit) },
-                    { $limit: parseInt(limit) }
+                    { $unwind: "$popularVideos" },
+                    { $replaceRoot: { newRoot: "$popularVideos" } },
+                ],
+                recentVideos: [
+                    {
+                        $match: { username: username },
+                    },
+                    {
+                        $lookup: {
+                            from: "videos",
+                            localField: "_id",
+                            foreignField: "ownerId",
+                            as: "recentVideos",
+                            pipeline: [
+                                {
+                                    $sort: { createdAt: -1 }
+                                },
+                                {
+                                    $limit: 5
+                                },
+                                {
+                                    $project: {
+                                        description: 0,
+                                        videoFile: 0,
+                                        publishStatus: 0,
+                                        updatedAt: 0,
+                                        __v: 0,
+                                        ownerUsername: 0,
+                                    }
+                                },
+                            ]
+                        }
+                    },
+                    { $unwind: "$recentVideos" },
+                    { $replaceRoot: { newRoot: "$recentVideos" } },
                 ]
             },
         },

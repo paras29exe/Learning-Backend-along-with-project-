@@ -82,7 +82,7 @@ const uploadVideo = asyncHandler(async (req, res) => {
             videoFile: videoFile.url,
             duration: formattedDuration(videoFile.duration),
             ownerId: req.user._id,
-            ownerchannelId: req.user.channelId,
+            ownerUsername: req.user.username,
             ownerChannelName: req.user.fullName,
             ownerAvatar: req.user.avatar
         })
@@ -235,25 +235,23 @@ const togglePublishStatus = asyncHandler(async (req, res) => {
 
 const getChannelVideos = asyncHandler(async (req, res) => {
     const { page = 1, limit = 20, sortBy = "createdAt", order = "desc" } = req.query;
-    const { channelId } = req.params;
+    const { username } = req.params;
 
-    if (!channelId) {
+    if (!username) {
         throw new ApiError(404, "Invalid Query! Please pass a channelId");
     }
 
     const sortOrder = (order === "desc") ? -1 : 1;
 
     // Fetching videos with sorting and pagination
-    const videos = await Video.find({ ownerId: channelId, publishStatus: "public" })
+    const videos = await Video.find({ ownerUsername: username, publishStatus: "public" })
         .sort({ [sortBy]: sortOrder })
         .skip((page - 1) * limit)
         .limit(parseInt(limit))
         .select("title thumbnail videoFile publishStatus views ownerId ownerChannelName createdAt");
 
-    const totalVideos = await Video.countDocuments({ ownerId: channelId, publishStatus: "public" });
-
     return res.status(200)
-        .json(new ApiResponse(200, { videos, totalVideos }, "Videos fetched successfully"));
+        .json(new ApiResponse(200, videos, "Videos fetched successfully"));
 })
 
 const getHomeAndSearchVideos = asyncHandler(async (req, res) => {
@@ -325,6 +323,7 @@ const getHomeAndSearchVideos = asyncHandler(async (req, res) => {
             ownerId: 1,
             ownerAvatar: 1,
             ownerChannelName: 1,
+            ownerUsername: 1,
             createdAt: 1
         }
     });

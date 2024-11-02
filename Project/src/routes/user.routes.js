@@ -40,7 +40,7 @@ userRouter.route("/update-account-details").put(verifyJWT, upload.fields([
     }
 ]), updateAccountDetails);
 
-userRouter.route("/get-channel/:channelId").get(getChannelById)
+userRouter.route("/get-channel/:username").get(getChannelById)
 
 userRouter.route("/get-watch-history").get(verifyJWT, getWatchHistory)
 

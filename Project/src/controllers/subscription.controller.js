@@ -188,6 +188,8 @@ const subscribedChannelVideos = asyncHandler(async (req, res) => {
                                 duration: 1,
                                 ownerAvatar: 1,
                                 ownerId: 1,
+                                ownerUsername: 1,
+                                
                                 ownerChannelName: 1,
                                 createdAt: 1
                             }
