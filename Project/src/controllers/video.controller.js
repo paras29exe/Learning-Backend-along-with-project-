@@ -8,6 +8,8 @@ import { Like } from "../models/like.model.js";
 import { Comment } from "../models/comment.model.js";
 import jwt from "jsonwebtoken"
 import { deleteFileFromCloudinary, fileUploadOnCloudinary } from "../utils/cloudinary.js";
+import isLoggedIn from "../utils/isLoggedIn.js";
+import fs from "fs"
 
 // utility function to find owner and video document
 async function findOwnerOfVideo(req) {
@@ -35,27 +37,19 @@ const uploadVideo = asyncHandler(async (req, res) => {
     // save the video file and thumbnail file in temp folder then upload to cloudinary
     // save the details in the database as a Video model instance
     // return the response with the video data
+    const { title, description } = req.body && req.body;
+    const thumbnailLocalPath = req.files?.thumbnail?.[0]?.path
+    const videoLocalPath = req.files?.videoFile?.[0]?.path
+
     try {
 
-        const { title, description } = req.body && req.body;
-
-        let thumbnailLocalPath
-        let videoLocalPath
-
-        // checking whether the thumbnail was given or not
-        if (req.files && Array.isArray(req.files.thumbnail) && req.files.thumbnail.length > 0) {
-            thumbnailLocalPath = req.files.thumbnail[0].path
-        } else {
+        if(!thumbnailLocalPath) {
             throw new ApiError(400, "Thumbnail is required field", "thumbnail")
         }
-
-        // checking whether the video file was given or not
-        if (req.files && Array.isArray(req.files.videoFile) && req.files.videoFile.length > 0) {
-            videoLocalPath = req.files.videoFile[0].path
-        } else {
+        
+        if(!videoLocalPath) {
             throw new ApiError(400, "Video file is required field", "videoFile")
         }
-
 
         if (!title && !description && !thumbnailLocalPath && !videoLocalPath) {
             throw new ApiError(400, "All fields must be Provided");
@@ -95,10 +89,13 @@ const uploadVideo = asyncHandler(async (req, res) => {
             .json(new ApiResponse(200, uploadedVideo, "Video uploaded successfully!"))
 
     } catch (error) {
+        thumbnailLocalPath && fs.unlinkSync(thumbnailLocalPath, () => {})
+        videoLocalPath && fs.unlinkSync(videoLocalPath, () => {})
+
         // Handle Multer file size error
         if (error instanceof multer.MulterError && error.code === 'LIMIT_FILE_SIZE') {
             return res.status(400)
-                .json(new ApiResponse(400, null, "File size exceeds the allowed limit of 50MB.", videoFile));
+                .json(new ApiResponse(400, null, "File size exceeds the allowed limit of 50MB."));
         }
 
         // Handle other errors
@@ -248,7 +245,7 @@ const getChannelVideos = asyncHandler(async (req, res) => {
         .sort({ [sortBy]: sortOrder })
         .skip((page - 1) * limit)
         .limit(parseInt(limit))
-        .select("title thumbnail videoFile publishStatus views ownerId ownerChannelName createdAt");
+        .select("title thumbnail videoFile publishStatus views duration ownerId ownerChannelName createdAt");
 
     return res.status(200)
         .json(new ApiResponse(200, videos, "Videos fetched successfully"));
@@ -257,17 +254,7 @@ const getChannelVideos = asyncHandler(async (req, res) => {
 const getHomeAndSearchVideos = asyncHandler(async (req, res) => {
     // NOTE: First of all create a index in mongo db ATLAS for searching video based on query [ask to google or something]
     // validating if user is logged in or not
-
-    const accessToken = req.cookies?.accessToken || req.header("Authorization")?.replace("Bearer ", "")
-
-    if (accessToken) {
-        const decodedToken = jwt.verify(accessToken, process.env.ACCESS_TOKEN_SECRET)
-
-        if (decodedToken) {
-            const user = await User.findById(decodedToken._id)
-            req.user = user
-        }
-    }
+    req.user = await isLoggedIn(req)
 
     const { page = 1, limit = 30, sortBy = "createdAt", order = "asc", query } = req.query;
 
@@ -352,16 +339,7 @@ const playVideo = asyncHandler(async (req, res) => {
     // then find the comments and likes on those commentthat have same video id
     // finally return the response with all the required details
 
-    const accessToken = req.cookies?.accessToken || req.header("Authorization")?.replace("Bearer ", "")
-
-    if (accessToken) {
-        const decodedToken = jwt.verify(accessToken, process.env.ACCESS_TOKEN_SECRET)
-
-        if (decodedToken) {
-            const user = await User.findById(decodedToken._id)
-            req.user = user
-        }
-    }
+    req.user = await isLoggedIn(req)
 
     const { videoId } = req.query
 

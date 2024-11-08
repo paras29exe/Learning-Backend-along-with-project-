@@ -7,6 +7,7 @@ import { ApiResponse } from "../utils/apiResponse.js"
 import jwt from "jsonwebtoken"
 import mongoose from "mongoose"
 import fs from "fs"
+import isLoggedIn from "../utils/isLoggedIn.js"
 
 const generateAccessAndRefreshToken = async (userId) => {
     // try catch 
@@ -128,11 +129,12 @@ const loginUser = asyncHandler(async (req, res, next) => {
     const options = {
         httpOnly: true,
         secure: true,
+        sameSite: 'lax'
     }
 
     return res.status(200)
-        .cookie("accessToken", accessToken, options)
-        .cookie("refreshToken", refreshToken, options)
+        .cookie("accessToken", accessToken, { ...options, maxAge: parseInt(process.env.ACCESS_TOKEN_EXPIRY) * 24 * 60 * 60 * 1000 })
+        .cookie("refreshToken", refreshToken, { ...options, maxAge: parseInt(process.env.REFRESH_TOKEN_EXPIRY) * 24 * 60 * 60 * 1000})
         .json(new ApiResponse(200, { user: loggedInUser, accessToken, refreshToken }, "User logged in successfully"))
 })
 
@@ -178,13 +180,14 @@ const refreshTheTokens = asyncHandler(async (req, res, next) => {
     const options = {
         httpOnly: true,
         secure: true,
+        sameSite: 'lax'
     }
 
     const { accessToken, refreshToken } = await generateAccessAndRefreshToken(loggedUser._id)
 
     return res.status(200)
-        .cookie("accessToken", accessToken, options)
-        .cookie("refreshToken", refreshToken, options)
+        .cookie("accessToken", accessToken, { ...options, maxAge: parseInt(process.env.ACCESS_TOKEN_EXPIRY) * 24 * 60 * 60 * 1000 })
+        .cookie("refreshToken", refreshToken, { ...options, maxAge: parseInt(process.env.REFRESH_TOKEN_EXPIRY) * 24 * 60 * 60 * 1000 })
         .json(new ApiResponse(200, { user: loggedUser, accessToken, newRefreshToken: refreshToken }, "Access token refreshed successfully"))
 })
 
@@ -290,185 +293,182 @@ const updateAccountDetails = asyncHandler(async (req, res) => {
 })
 
 const getChannelById = asyncHandler(async (req, res) => {
-    const accessToken = req.cookies?.accessToken || req.header("Authorization")?.replace("Bearer ", "")
-
-    if (accessToken) {
-        const decodedToken = jwt.verify(accessToken, process.env.ACCESS_TOKEN_SECRET)
-
-        if (decodedToken) {
-            const user = await User.findById(decodedToken._id)
-            req.user = user
-        }
-    }
+    req.user = await isLoggedIn(req)
 
     const { page = 1, limit = 24 } = req.query
     const { username } = req.params
     // console.log(username);
-
-
     // if (!mongoose.isValidObjectId(username)) throw new ApiError(400, "Invalid Channel ID provided")
 
-
-    const channel = await User.aggregate([
-        {
-            $facet: {
-                channelDetails: [
-                    { $match: { username: username } },
-                    { $addFields: { channelName: "$fullName" } },
-                    // finding no. of documents in subscription collection that has his ID in "channel" field
-                    {
-                        $lookup: {
-                            from: "subscriptions",
-                            localField: "_id",
-                            foreignField: "channel",
-                            as: "subscribers"
-                        }
-                    },
-                    {
-                        // overwriting the matching documents with in array their size of array or count of documents 
-                        $addFields: {
-                            subscribers: { $size: "$subscribers" }
-                        }
-                    },
-                    {
-                        $lookup: {
-                            from: "subscriptions",
-                            let: {
-                                channel: "$_id",
-                                viewer: req.user?._id
-                            },
-                            pipeline: [
-                                {
-                                    $match: {
-                                        $expr: {
-                                            $and: [
-                                                { $eq: ["$channel", "$$channel"] },
-                                                { $eq: ["$subscriber", "$$viewer"] }
-                                            ]
+    try {
+        const channel = await User.aggregate([
+            {
+                $facet: {
+                    channelDetails: [
+                        {
+                            $match: {
+                                username: username,
+                                _id: { $ne: req?.user?._id }
+                            }
+                        },
+                        { $addFields: { channelName: "$fullName" } },
+                        // finding no. of documents in subscription collection that has his ID in "channel" field
+                        {
+                            $lookup: {
+                                from: "subscriptions",
+                                localField: "_id",
+                                foreignField: "channel",
+                                as: "subscribers"
+                            }
+                        },
+                        {
+                            // overwriting the matching documents with in array their size of array or count of documents 
+                            $addFields: {
+                                subscribers: { $size: "$subscribers" }
+                            }
+                        },
+                        {
+                            $lookup: {
+                                from: "subscriptions",
+                                let: {
+                                    channel: "$_id",
+                                    viewer: req.user?._id
+                                },
+                                pipeline: [
+                                    {
+                                        $match: {
+                                            $expr: {
+                                                $and: [
+                                                    { $eq: ["$channel", "$$channel"] },
+                                                    { $eq: ["$subscriber", "$$viewer"] }
+                                                ]
+                                            }
                                         }
                                     }
+                                ],
+                                as: "subscribedByViewer"
+                            }
+                        },
+                        {
+                            $addFields: {
+                                subscribedByViewer: {
+                                    $cond: [
+                                        { $eq: [{ $size: "$subscribedByViewer" }, 1] },
+                                        true,
+                                        false
+                                    ]
                                 }
-                            ],
-                            as: "subscribedByViewer"
-                        }
-                    },
-                    {
-                        $addFields: {
-                            subscribedByViewer: {
-                                $cond: [
-                                    { $eq: [{ $size: "$subscribedByViewer" }, 1] },
-                                    true,
-                                    false
-                                ]
+                            }
+                        },
+                        {
+                            $lookup: {
+                                from: "videos",
+                                localField: "_id",
+                                foreignField: "ownerId",
+                                as: "totalVideos"
+                            }
+                        },
+                        {
+                            $addFields: {
+                                totalVideos: { $size: "$totalVideos" }
+                            }
+                        },
+                        {
+                            $project: {
+                                fullName: 0,
+                                email: 0,
+                                password: 0,
+                                __v: 0,
+                                refreshToken: 0,
+                                accessToken: 0,
+                                watchHistory: 0,
+                                updatedAt: 0
                             }
                         }
-                    },
-                    {
-                        $lookup: {
-                            from: "videos",
-                            localField: "_id",
-                            foreignField: "ownerId",
-                            as: "totalVideos"
-                        }
-                    },
-                    {
-                        $addFields: {
-                            totalVideos: { $size: "$totalVideos" }
-                        }
-                    },
-                    {
-                        $project: {
-                            fullName: 0,
-                            email: 0,
-                            password: 0,
-                            __v: 0,
-                            refreshToken: 0,
-                            accessToken: 0,
-                            watchHistory: 0,
-                            updatedAt: 0
-                        }
-                    }
 
-                ],
-                popularVideos: [
-                    {
-                        $match: { username: username },
-                    },
-                    {
-                        $lookup: {
-                            from: "videos",
-                            localField: "_id",
-                            foreignField: "ownerId",
-                            as: "popularVideos",
-                            pipeline: [
-                                {
-                                    $sort: { "views": -1 }
-                                },
-                                {
-                                    $limit: 5
-                                },
-                                {
-                                    $project: {
-                                        description: 0,
-                                        videoFile: 0,
-                                        publishStatus: 0,
-                                        updatedAt: 0,
-                                        __v: 0,
-                                        ownerUsername: 0,
-                                    }
-                                },
-                            ]
-                        }
-                    },
-                    { $unwind: "$popularVideos" },
-                    { $replaceRoot: { newRoot: "$popularVideos" } },
-                ],
-                recentVideos: [
-                    {
-                        $match: { username: username },
-                    },
-                    {
-                        $lookup: {
-                            from: "videos",
-                            localField: "_id",
-                            foreignField: "ownerId",
-                            as: "recentVideos",
-                            pipeline: [
-                                {
-                                    $sort: { createdAt: -1 }
-                                },
-                                {
-                                    $limit: 5
-                                },
-                                {
-                                    $project: {
-                                        description: 0,
-                                        videoFile: 0,
-                                        publishStatus: 0,
-                                        updatedAt: 0,
-                                        __v: 0,
-                                        ownerUsername: 0,
-                                    }
-                                },
-                            ]
-                        }
-                    },
-                    { $unwind: "$recentVideos" },
-                    { $replaceRoot: { newRoot: "$recentVideos" } },
-                ]
+                    ],
+                    popularVideos: [
+                        {
+                            $match: { username: username },
+                        },
+                        {
+                            $lookup: {
+                                from: "videos",
+                                localField: "_id",
+                                foreignField: "ownerId",
+                                as: "popularVideos",
+                                pipeline: [
+                                    {
+                                        $sort: { "views": -1 }
+                                    },
+                                    {
+                                        $limit: 5
+                                    },
+                                    {
+                                        $project: {
+                                            description: 0,
+                                            videoFile: 0,
+                                            publishStatus: 0,
+                                            updatedAt: 0,
+                                            __v: 0,
+                                            ownerUsername: 0,
+                                        }
+                                    },
+                                ]
+                            }
+                        },
+                        { $unwind: "$popularVideos" },
+                        { $replaceRoot: { newRoot: "$popularVideos" } },
+                    ],
+                    recentVideos: [
+                        {
+                            $match: { username: username },
+                        },
+                        {
+                            $lookup: {
+                                from: "videos",
+                                localField: "_id",
+                                foreignField: "ownerId",
+                                as: "recentVideos",
+                                pipeline: [
+                                    {
+                                        $sort: { createdAt: -1 }
+                                    },
+                                    {
+                                        $limit: 5
+                                    },
+                                    {
+                                        $project: {
+                                            description: 0,
+                                            videoFile: 0,
+                                            publishStatus: 0,
+                                            updatedAt: 0,
+                                            __v: 0,
+                                            ownerUsername: 0,
+                                        }
+                                    },
+                                ]
+                            }
+                        },
+                        { $unwind: "$recentVideos" },
+                        { $replaceRoot: { newRoot: "$recentVideos" } },
+                    ]
+                },
             },
-        },
-        {
-            $unwind: "$channelDetails"
-        },
-    ])
+            {
+                $unwind: "$channelDetails"
+            },
+        ])
 
-    if (Object.keys(channel[0].channelDetails).length === 0) {
-        throw new ApiError(404, "Channel not found")
+        if (!channel[0]) {
+            throw new ApiError(404, "Channel not found", "wrong username")
+        }
+
+        return res.status(200)
+            .json(new ApiResponse(200, channel[0], "Channel fetched successfully"));
+    } catch (error) {
+        throw error
     }
-
-    return res.status(200)
-        .json(new ApiResponse(200, channel[0], "Channel fetched successfully"));
 })
 
 const getWatchHistory = asyncHandler(async (req, res) => {
