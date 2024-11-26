@@ -43,11 +43,11 @@ const uploadVideo = asyncHandler(async (req, res) => {
 
     try {
 
-        if(!thumbnailLocalPath) {
+        if (!thumbnailLocalPath) {
             throw new ApiError(400, "Thumbnail is required field", "thumbnail")
         }
-        
-        if(!videoLocalPath) {
+
+        if (!videoLocalPath) {
             throw new ApiError(400, "Video file is required field", "videoFile")
         }
 
@@ -59,7 +59,7 @@ const uploadVideo = asyncHandler(async (req, res) => {
         const videoFile = await fileUploadOnCloudinary(videoLocalPath)
 
         if (!thumbnail || !videoFile) {
-            throw new ApiError(400, "Video Error :: File upload Failed" , "videoFile")
+            throw new ApiError(400, "Video Error :: File upload Failed", "videoFile")
         }
 
         const formattedDuration = (seconds) => {
@@ -81,7 +81,7 @@ const uploadVideo = asyncHandler(async (req, res) => {
             ownerAvatar: req.user.avatar
         })
 
-        if(!video) console.log("Error creating video")
+        if (!video) console.log("Error creating video")
 
         const uploadedVideo = await Video.findById(video?._id)
 
@@ -89,8 +89,8 @@ const uploadVideo = asyncHandler(async (req, res) => {
             .json(new ApiResponse(200, uploadedVideo, "Video uploaded successfully!"))
 
     } catch (error) {
-        thumbnailLocalPath && fs.unlinkSync(thumbnailLocalPath, () => {})
-        videoLocalPath && fs.unlinkSync(videoLocalPath, () => {})
+        thumbnailLocalPath && fs.unlinkSync(thumbnailLocalPath, () => { })
+        videoLocalPath && fs.unlinkSync(videoLocalPath, () => { })
 
         // Handle Multer file size error
         if (error instanceof multer.MulterError && error.code === 'LIMIT_FILE_SIZE') {
@@ -172,13 +172,13 @@ const deleteVideo = asyncHandler(async (req, res) => {
 
     // now the user is authenticated to delete the video
     const deleted = await Video.deleteOne(video._id, { secure: true })
-    const deletedLikes = await Like.deleteMany({video: video._id})
+    const deletedLikes = await Like.deleteMany({ video: video._id })
 
-    const comments = await Comment.find({videoId: video._id})
+    const comments = await Comment.find({ videoId: video._id })
     const commentIds = comments.map((comment) => comment._id)
     const deletedCommentLikes = await Like.deleteMany({ comment: { $in: commentIds } });
 
-    const deletedComments = await Comment.deleteMany({videoId: video._id})    
+    const deletedComments = await Comment.deleteMany({ videoId: video._id })
 
     if (!deleted || !deletedLikes || !deletedCommentLikes || !deletedComments) {
         throw new ApiError(500, "Video Deletion failed! Try again later")
@@ -256,17 +256,19 @@ const getHomeAndSearchVideos = asyncHandler(async (req, res) => {
     // validating if user is logged in or not
     req.user = await isLoggedIn(req)
 
-    const { page = 1, limit = 30, sortBy = "createdAt", order = "asc", query } = req.query;
+    const { page = 1, limit = 10, sortBy = "createdAt", order = "asc", query } = req.query;
 
     const sortOrder = (order === "desc") ? -1 : 1;
 
     const pipeline = [];
+    const alreadyFetchedIds = []
 
     if (req.user) {
         // console.log(req.user);
         pipeline.push(
             {
                 $match: {
+                    _id: { $nin: alreadyFetchedIds.map(id => new ObjectId(id)) },
                     ownerId: { $ne: req.user._id },
                     publishStatus: "public"
                 }
@@ -342,6 +344,7 @@ const playVideo = asyncHandler(async (req, res) => {
     req.user = await isLoggedIn(req)
 
     const { videoId } = req.query
+    const { selfVideo } = req.body
 
     if (!mongoose.Types.ObjectId.isValid(videoId)) {
         throw new ApiError(404, "Invalid Video Id provided")
@@ -356,17 +359,15 @@ const playVideo = asyncHandler(async (req, res) => {
         randomVideosQuery.ownerId = { $ne: req.user._id }
     }
 
-
-    // refer to "src/reference/reference_for_playvideo_page.png" to know why we are collecting all this data
-    const videoPage = await Video.aggregate([
+    const pipeline = [
         {
             $facet: {
                 videoDetails: [
                     {
                         $match: {
                             _id: mongoose.Types.ObjectId.createFromHexString(videoId),
-                            publishStatus: "public",
-                            ownerId: { $ne: req?.user?._id }
+                            publishStatus: { $ne: (!selfVideo ? "private" : "")},
+                            ownerId: { $ne: (!selfVideo ? req?.user?._id : "") }
                         }
                     },
                     {
@@ -557,7 +558,7 @@ const playVideo = asyncHandler(async (req, res) => {
                                         }
                                     }
                                 },
-
+    
                             ]
                         }
                     },*/
@@ -578,51 +579,57 @@ const playVideo = asyncHandler(async (req, res) => {
                         }
                     },
                 ],
-                randomVideos: [
-                    {
-                        $match: randomVideosQuery
-                    },
-                    {
-                        $sample: { size: 15 }
-                    },
-                    {
-                        $lookup: {
-                            from: "users",
-                            localField: "ownerId",
-                            foreignField: "_id",
-                            as: "channelDetails",
-                        }
-                    },
-                    {
-                        $unwind: "$channelDetails",
-                    },
-                    {
-                        $addFields: {
-                            channelId: "$channelDetails._id",
-                            channelName: "$channelDetails.fullName",
-                            channelAvatar: "$channelDetails.avatar",
-                        }
-                    },
-                    {
-                        $project: {
-                            _id: 1,
-                            title: 1,
-                            thumbnail: 1,
-                            views: 1,
-                            duration: 1,
-                            createdAt: 1,
-                            channelName: 1,
-                            channelAvatar: 1,
-                            channelId: 1,
-                        }
-                    },
-                ]
             }
         },
         {
             $unwind: "$videoDetails"
         }
-    ])
+    ]
+
+    if (!selfVideo) {
+        pipeline[0].$facet.randomVideos = [
+            {
+                $match: randomVideosQuery
+            },
+            {
+                $sample: { size: 15 }
+            },
+            {
+                $lookup: {
+                    from: "users",
+                    localField: "ownerId",
+                    foreignField: "_id",
+                    as: "channelDetails",
+                }
+            },
+            {
+                $unwind: "$channelDetails",
+            },
+            {
+                $addFields: {
+                    channelId: "$channelDetails._id",
+                    channelName: "$channelDetails.fullName",
+                    channelAvatar: "$channelDetails.avatar",
+                }
+            },
+            {
+                $project: {
+                    _id: 1,
+                    title: 1,
+                    thumbnail: 1,
+                    views: 1,
+                    duration: 1,
+                    createdAt: 1,
+                    channelName: 1,
+                    channelAvatar: 1,
+                    channelId: 1,
+                }
+            },
+        ];
+    }
+
+    // refer to "src/reference/reference_for_playvideo_page.png" to know why we are collecting all this data
+    const videoPage = await Video.aggregate(pipeline)
 
     if (!videoPage[0]) {
         throw new ApiError(404, "This video is private Or cannot be played")
@@ -639,7 +646,7 @@ const playVideo = asyncHandler(async (req, res) => {
     await User.findByIdAndUpdate(req.user?._id,
         {
             $pull: {
-                watchHistory: videoId 
+                watchHistory: videoId
             }
         },
         {

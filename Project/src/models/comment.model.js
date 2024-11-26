@@ -16,7 +16,9 @@ const commentSchema = new mongoose.Schema({
         required: true
     },
     ownerAvatar: {
-        type: String, 
+        type: mongoose.Schema.Types.String, 
+        ref: "User",
+        required: true
     },
     videoId: {
         type: mongoose.Schema.Types.ObjectId,

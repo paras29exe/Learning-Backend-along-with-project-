@@ -131,7 +131,7 @@ const getChannelStats = asyncHandler(async (req, res) => {
         .json(new ApiResponse(200, stats[0], "Channel Stats has loaded successfully"))
 })
 
-const getChannelVideos = asyncHandler(async (req, res) => {
+const getUserVideos = asyncHandler(async (req, res) => {
     // Get all the videos uploaded by the channel
     // Sort the videos based on their upload date
     // Pagination for videos
@@ -142,11 +142,36 @@ const getChannelVideos = asyncHandler(async (req, res) => {
 
     const sortOrder = (order === "desc") ? -1 : 1
 
-    const videos = await Video.find({ ownerId: userId })
-        .sort({ [sortBy]: sortOrder })
-        .skip(parseInt(page) - 1 * parseInt(limit))
-        .limit(parseInt(limit))
-        .exec();
+    const videos = await Video.aggregate([
+        { $match: { ownerId: userId } },
+        // lookup from likes to get total likes
+        {
+            $lookup: {
+                from: "likes",
+                localField: "_id",
+                foreignField: "video",
+                as: "likes"
+            }
+        },
+        {
+            $addFields: { likes: { $size: "$likes" } }
+        },
+        // lookup from comments to get total comments
+        {
+            $lookup: {
+                from: "comments",
+                localField: "_id",
+                foreignField: "videoId",
+                as: "comments"
+            }
+        },
+        {
+            $addFields: { comments: { $size: "$comments" } }
+        },
+        { $sort: { [sortBy]: sortOrder } },
+        { $skip: (parseInt(page) - 1) * parseInt(limit) },
+        { $limit: parseInt(limit) }
+    ])
 
     if (!videos.length) return res.status(200).json(new ApiResponse(200, [], "No videos found for this channel"))
 
@@ -156,5 +181,5 @@ const getChannelVideos = asyncHandler(async (req, res) => {
 
 export {
     getChannelStats,
-    getChannelVideos,
+    getUserVideos,
 };

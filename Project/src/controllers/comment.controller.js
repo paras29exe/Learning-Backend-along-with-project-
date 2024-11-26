@@ -132,6 +132,28 @@ const getComments = asyncHandler(async (req, res) => {
             }
         },
         {
+            $lookup: {
+                from: "likes",
+                let: {
+                    commentId: "$_id",
+                    owner: "$ownerId"
+                },
+                pipeline: [
+                    {
+                        $match: {
+                            $expr: {
+                                $and: [
+                                    { $eq: ["$comment", "$$commentId"] },
+                                    { $eq: ["$likedBy", "$$owner"] }
+                                ]
+                            }
+                        }
+                    },
+                ],
+                as: "likedByOwner"
+            }
+        },
+        {
             $project: {
                 content: 1,
                 ownerAvatar: 1,
@@ -140,10 +162,16 @@ const getComments = asyncHandler(async (req, res) => {
                 createdAt: 1,
                 owner: 1,
                 likesCount: 1,
-                likesOnComment: 1,
                 likedByViewer: {
                     $cond: [
                         { $eq: [{ $size: "$likedByViewer" }, 1] },
+                        true,
+                        false
+                    ]
+                },
+                likedByOwner: {
+                    $cond: [
+                        { $eq: [{ $size: "$likedByOwner" }, 1] },
                         true,
                         false
                     ]

@@ -29,8 +29,8 @@ const generateAccessAndRefreshToken = async (userId) => {
 
 const registerUser = asyncHandler(async (req, res, next) => {
 
-    const avatarLocalPath = req.files?.avatar?.[0].path
-    const coverImageLocalPath = req.files.coverImage?.[0].path
+    const avatarLocalPath = req.files?.avatar?.[0]?.path
+    const coverImageLocalPath = req.files.coverImage?.[0]?.path
 
     const { fullName, email, username, password } = req.body
     try {
@@ -134,7 +134,7 @@ const loginUser = asyncHandler(async (req, res, next) => {
 
     return res.status(200)
         .cookie("accessToken", accessToken, { ...options, maxAge: parseInt(process.env.ACCESS_TOKEN_EXPIRY) * 24 * 60 * 60 * 1000 })
-        .cookie("refreshToken", refreshToken, { ...options, maxAge: parseInt(process.env.REFRESH_TOKEN_EXPIRY) * 24 * 60 * 60 * 1000})
+        .cookie("refreshToken", refreshToken, { ...options, maxAge: parseInt(process.env.REFRESH_TOKEN_EXPIRY) * 24 * 60 * 60 * 1000 })
         .json(new ApiResponse(200, { user: loggedInUser, accessToken, refreshToken }, "User logged in successfully"))
 })
 
@@ -232,64 +232,100 @@ const updateAccountDetails = asyncHandler(async (req, res) => {
     // take fields to be changed
     // update them in database 
     // return the response
-    const { fullName, email } = req.body
+    const { fullName, username, sameCover } = req.body
 
     const { avatar, coverImage } = req.files || {}
 
-    if (!fullName && !email && !avatar && !coverImage) {
-        return res.status(400)
-            .json(new ApiError(400, {}, "No Changes have been made by user"))
-    }
-    // storing the changed field to return in response by selecting the changed field
-    let avatarLink;
-    let coverImageLink;
-
-    if (avatar) {
-        const avatarLocalPath = avatar[0].path
-
-        avatarLink = await fileUploadOnCloudinary(avatarLocalPath)
-        avatarLink = avatarLink.url
-
-        if (!avatarLink) {
-            throw new ApiError(500, "Failed to upload avatar on Cloudinary")
+    try {
+        if (!fullName && !username && !avatar && !coverImage && sameCover === 'true') {
+            return res.status(400)
+                .json(new ApiError(400, {}, "No Changes have been made by user"))
         }
 
-        if (req.user?.avatar) {
-            await deleteFileFromCloudinary(req.user.avatar)
-        }
-    }
-
-    if (coverImage) {
-        const coverImageLocalPath = coverImage[0]?.path
-
-        coverImageLink = await fileUploadOnCloudinary(coverImageLocalPath)
-        coverImageLink = coverImageLink.url
-
-        if (!coverImageLink) {
-            throw new ApiError(500, "Failed to upload cover image on Cloudinary")
-        }
-
-        if (req.user?.coverImage) {
-            await deleteFileFromCloudinary(req.user.coverImage)
-        }
-    }
-
-
-    const userAccount = await User.findByIdAndUpdate(req.user._id,
-        {
-            $set: {
-                fullName: fullName || req.user.fullName,
-                email: email || req.user.email,
-                avatar: avatarLink || req.user.avatar,
-                coverImage: coverImageLink || req.user.coverImage
+        if (username) {
+            const userExists = await User.findOne({ username })
+            if (userExists && userExists._id.toString() !== req.user._id.toString()) {
+                throw new ApiError(409, "Username already taken", "username")
             }
-        },
-        { new: true }
-    ).select(`username fullName email avatar coverImage`)
+        }
 
-    return res.status(200)
-        .json(new ApiResponse(200, userAccount, "Account details updated successfully!"))
+        // storing the changed field to return in response by selecting the changed field
+        let avatarLink;
+        let coverImageLink;
 
+        if (avatar) {
+
+            const avatarLocalPath = avatar[0]?.path
+
+            avatarLink = await fileUploadOnCloudinary(avatarLocalPath)
+            avatarLink = avatarLink.url
+
+            if (!avatarLink) {
+                throw new ApiError(500, "Failed to upload avatar on Cloudinary")
+            }
+
+            if (req.user?.avatar) {
+                await deleteFileFromCloudinary(req.user.avatar)
+            }
+        }
+
+        if (sameCover === 'false' && !coverImage) {
+            if (req.user?.coverImage) {
+                await deleteFileFromCloudinary(req.user.coverImage)
+                req.user.coverImage = ""
+            }
+        }
+
+        if (coverImage) {
+            const coverImageLocalPath = coverImage[0]?.path
+
+            coverImageLink = await fileUploadOnCloudinary(coverImageLocalPath)
+            coverImageLink = coverImageLink.url
+
+            if (!coverImageLink) {
+                throw new ApiError(500, "Failed to upload cover image on Cloudinary")
+            }
+
+            if (req.user?.coverImage) {
+                await deleteFileFromCloudinary(req.user.coverImage)
+            }
+        }
+
+
+        const userAccount = await User.findByIdAndUpdate(req.user._id,
+            {
+                $set: {
+                    fullName: fullName || req.user.fullName,
+                    username: username || req.user.username,
+                    avatar: avatarLink || req.user.avatar,
+                    coverImage: coverImageLink || req.user.coverImage
+                }
+            },
+            { new: true }
+        ).select(`username fullName email avatar coverImage`)
+
+        await Video.updateMany({ownerId: req.user?.id}, {
+            $set: {
+                ownerChannelName: fullName || req.user.fullName,
+                ownerUsername: username || req.user.username,
+                ownerAvatar: avatarLink || req.user.avatar,
+            }
+        })
+        await Comment.updateMany({ownerId: req.user?.id}, {
+            $set: {
+                ownerUsername: username || req.user.username,
+                ownerAvatar: avatarLink || req.user.avatar,
+            }
+        })
+
+        return res.status(200)
+            .json(new ApiResponse(200, userAccount, "Account details updated successfully!"))
+
+    } catch (error) {
+        avatar && fs.unlink(avatar[0]?.path, () => { })
+        coverImage && fs.unlink(coverImage[0]?.path, () => { })
+        throw error
+    }
 })
 
 const getChannelById = asyncHandler(async (req, res) => {

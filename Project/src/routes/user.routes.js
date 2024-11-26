@@ -46,4 +46,5 @@ userRouter.route("/get-watch-history").get(verifyJWT, getWatchHistory)
 
 userRouter.route("/delete-account").delete(verifyJWT, deleteAccount)
 
+
 export default userRouter
