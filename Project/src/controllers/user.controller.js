@@ -304,14 +304,14 @@ const updateAccountDetails = asyncHandler(async (req, res) => {
             { new: true }
         ).select(`username fullName email avatar coverImage`)
 
-        await Video.updateMany({ownerId: req.user?.id}, {
+        await Video.updateMany({ ownerId: req.user?.id }, {
             $set: {
                 ownerChannelName: fullName || req.user.fullName,
                 ownerUsername: username || req.user.username,
                 ownerAvatar: avatarLink || req.user.avatar,
             }
         })
-        await Comment.updateMany({ownerId: req.user?.id}, {
+        await Comment.updateMany({ ownerId: req.user?.id }, {
             $set: {
                 ownerUsername: username || req.user.username,
                 ownerAvatar: avatarLink || req.user.avatar,
@@ -435,6 +435,11 @@ const getChannelById = asyncHandler(async (req, res) => {
                                 as: "popularVideos",
                                 pipeline: [
                                     {
+                                        $match: {
+                                            publishStatus: "public",
+                                        }
+                                    },
+                                    {
                                         $sort: { "views": -1 }
                                     },
                                     {
@@ -467,6 +472,11 @@ const getChannelById = asyncHandler(async (req, res) => {
                                 foreignField: "ownerId",
                                 as: "recentVideos",
                                 pipeline: [
+                                    {
+                                        $match: {
+                                            publishStatus: "public",
+                                        }
+                                    },
                                     {
                                         $sort: { createdAt: -1 }
                                     },

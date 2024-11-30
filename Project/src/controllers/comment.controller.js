@@ -6,17 +6,17 @@ import { asyncHandler } from "../utils/asyncHandler.js"
 import { ApiError } from "../utils/apiError.js"
 import { ApiResponse } from "../utils/apiResponse.js"
 import mongoose from "mongoose"
+import { Video } from "../models/video.model.js"
 
 // utility function to find owner and video document
 async function findOwnerOfComment(req) {
 
     // frontend will associate the video id and comment id with each individual video while rendering videos and then pass it in url
-    const { videoId } = req.params;
-    if (!mongoose.Types.ObjectId.isValid(videoId)) {
+    const { videoId, commentId } = req.params;
+
+    if (videoId && !mongoose.Types.ObjectId.isValid(videoId)) {
         throw new ApiError(404, "Invalid Video Id provided")
     }
-
-    const { commentId } = req.params;
 
     if (!mongoose.Types.ObjectId.isValid(commentId)) {
         throw new ApiError(404, "Invalid comment Id provided")
@@ -24,10 +24,13 @@ async function findOwnerOfComment(req) {
 
     // finding video doc in db
     const comment = await Comment.findById(commentId)
+    const video = await Video.findById(comment.videoId)
 
     // extracting the owner of video doc and its owner id in string
-    const commentOwner = comment.ownerId.toString()
-    return { comment, commentOwner }
+    const isCommentOwner = comment.ownerId.toString() === req.user._id.toString()
+    const isVideoOwner = video.ownerId.toString() === req.user._id.toString()
+
+    return { comment, isCommentOwner, isVideoOwner }
 }
 
 const addComment = asyncHandler(async (req, res) => {
@@ -132,26 +135,26 @@ const getComments = asyncHandler(async (req, res) => {
             }
         },
         {
+            // looking up in videos to find the ownerId of video to show that is comment liked by ownerOfVideo or not
             $lookup: {
-                from: "likes",
-                let: {
-                    commentId: "$_id",
-                    owner: "$ownerId"
-                },
+                from: "videos",
+                localField: "videoId",
+                foreignField: "_id",
+                as: "video",
                 pipeline: [
                     {
-                        $match: {
-                            $expr: {
-                                $and: [
-                                    { $eq: ["$comment", "$$commentId"] },
-                                    { $eq: ["$likedBy", "$$owner"] }
-                                ]
-                            }
+                        $lookup: {
+                            from: "likes",
+                            localField: "ownerId",
+                            foreignField: "likedBy",
+                            as: "likedByOwner"
                         }
-                    },
-                ],
-                as: "likedByOwner"
+                    }
+                ]
             }
+        },
+        {
+            $unwind: "$video"
         },
         {
             $project: {
@@ -171,11 +174,12 @@ const getComments = asyncHandler(async (req, res) => {
                 },
                 likedByOwner: {
                     $cond: [
-                        { $eq: [{ $size: "$likedByOwner" }, 1] },
+                        { $eq: [{ $size: "$video.likedByOwner" }, 1] },
                         true,
                         false
                     ]
                 },
+
             }
         }
     ])
@@ -195,11 +199,11 @@ const editComment = asyncHandler(async (req, res) => {
 
     // user is logged in if he is passed to this function by middleware
     const { content } = req.body;
-    const { comment, commentOwner } = await findOwnerOfComment(req)
+    const { comment, isCommentOwner } = await findOwnerOfComment(req)
 
     if (String(content) !== comment.content) {
 
-        if (commentOwner !== req.user._id.toString()) {
+        if (!isCommentOwner) {
             throw new ApiError(403, "Unauthorized to edit this comment")
         }
 
@@ -222,7 +226,7 @@ const editComment = asyncHandler(async (req, res) => {
             .json(new ApiResponse(200, newComment, "Comment Updated Successfully"))
     } else {
         return res.status(400)
-            .json(new ApiResponse(400, {}, "No changes made to old comment"))
+            .json(new ApiResponse(400, {}, "No changes made by the user"))
     }
 })
 
@@ -232,19 +236,20 @@ const deleteComment = asyncHandler(async (req, res) => {
     // delete the comment from the database
     // return success message
 
-    const { comment, commentOwner } = await findOwnerOfComment(req)
+    const { comment, isCommentOwner, isVideoOwner } = await findOwnerOfComment(req)
 
-    if (commentOwner !== req.user._id.toString()) {
+    if (!isVideoOwner && !isCommentOwner) {
         throw new ApiError(403, "Unauthorized to delete this comment")
     }
+
     try {
         const deleted = await Comment.deleteOne({ _id: comment?._id }, { secure: true })
-        const deletedLikes = await Like.deleteMany({ comment: comment?._id})
+        const deletedLikes = await Like.deleteMany({ comment: comment?._id })
 
         if (!deleted || !deletedLikes) throw new ApiError(500, "Error while deleting comment")
 
         return res.status(200)
-            .json(new ApiResponse(200, {deleted: comment._id}, "Comment Deleted Successfully"))
+            .json(new ApiResponse(200, { deleted: comment._id }, "Comment Deleted Successfully"))
     } catch (error) {
         console.log(error)
     }

@@ -8,8 +8,8 @@ commentRouter.route("/add-comment/:videoId").post(verifyJWT, addComment)
 
 commentRouter.route("/get-comments/:videoId").get( getComments)
 
-commentRouter.route("/edit-comment/:videoId/:commentId").patch(verifyJWT, editComment)
+commentRouter.route("/edit-comment/:commentId").patch(verifyJWT, editComment)
 
-commentRouter.route("/delete-comment/:videoId/:commentId").delete(verifyJWT, deleteComment)
+commentRouter.route("/delete-comment/:commentId").delete(verifyJWT, deleteComment)
 
 export default commentRouter

@@ -27,9 +27,9 @@ async function findOwnerOfVideo(req) {
     const video = await Video.findById(videoId)
 
     // extracting the owner of video doc and its owner id in string
-    const videoOwner = video.ownerId.toString()
+    const isVideoOwner = video.ownerId.toString()
 
-    return { video, videoOwner }
+    return { video, isVideoOwner }
 }
 
 const uploadVideo = asyncHandler(async (req, res) => {
@@ -110,18 +110,18 @@ const updateVideoDetails = asyncHandler(async (req, res) => {
     // return the response with the updated video data
 
     // calling function to get video and its owner
-    const { video, videoOwner } = await findOwnerOfVideo(req)
+    const { video, isVideoOwner } = await findOwnerOfVideo(req)
 
-    if (videoOwner !== req.user?._id.toString()) {
+    if (!isVideoOwner) {
         throw new ApiError(403, "Unauthorized to update this video")
     }
 
     // taking details if authorised
-    const { title, description } = req.body && req.body;
-    let thumbnailLocalPath = req.file?.path
+    const { title, description, publishStatus } = req.body && req.body;
+    let thumbnailLocalPath = req.files?.thumbnail?.path
 
 
-    if (!title && !description && !thumbnailLocalPath) {
+    if (!title && !description && !publishStatus && !thumbnailLocalPath) {
         throw new ApiError(400, "No changes provided by user");
     }
 
@@ -141,6 +141,7 @@ const updateVideoDetails = asyncHandler(async (req, res) => {
             $set: {
                 title: title || video.title,
                 description: description || video.description,
+                publishStatus: publishStatus || video.publishStatus,
                 thumbnail: thumbnail || video.thumbnail
             }
         },
@@ -148,7 +149,7 @@ const updateVideoDetails = asyncHandler(async (req, res) => {
     )
 
     // deleting old thumbnail if new one is provided
-    if (thumbnailLocalPath && thumbnail && thumbnail !== video.thumbnail) {
+    if (thumbnailLocalPath && thumbnail && video.thumbnail ) {
         await deleteFileFromCloudinary(video.thumbnail)
     }
 
@@ -164,9 +165,9 @@ const deleteVideo = asyncHandler(async (req, res) => {
     // return the response with success message
 
     // calling function to get video and its owner
-    const { video, videoOwner } = await findOwnerOfVideo(req)
+    const { video, isVideoOwner } = await findOwnerOfVideo(req)
 
-    if (videoOwner !== req.user?._id.toString()) {
+    if (!isVideoOwner) {
         throw new ApiError(404, "Unauthorised to delete the video")
     }
 
@@ -194,40 +195,6 @@ const deleteVideo = asyncHandler(async (req, res) => {
 
     return res.status(200)
         .json(new ApiResponse(200, { video: "video has been removed" }, "Video Deleted successfully"))
-})
-
-const togglePublishStatus = asyncHandler(async (req, res) => {
-    const { publishStatus } = req.body
-    const { video, videoOwner } = await findOwnerOfVideo(req)
-
-    if (publishStatus !== video.publishStatus) {
-
-        if (videoOwner !== req.user?._id.toString()) {
-            throw new ApiError(404, "Unauthorised to Change publish status of the video")
-        }
-
-        if (!publishStatus) {
-            throw new ApiError(400, "Change the status before submitting")
-        }
-
-        const toggleStatus = await Video.findByIdAndUpdate(video._id,
-            {
-                $set: {
-                    publishStatus: publishStatus.toLowerCase(),
-                }
-            },
-            { new: true }
-        ).select("title thumbnail videoFile publishStatus views ownerId")
-
-        if (!toggleStatus) throw new ApiError(404, "Video with this Id not found")
-
-        return res.status(200)
-            .json(new ApiResponse(200, toggleStatus, "Publish Status changed successfully"))
-
-    } else {
-        return res.status(400)
-            .json(new ApiResponse(400, {}, "No changes provided by user"))
-    }
 })
 
 const getChannelVideos = asyncHandler(async (req, res) => {
@@ -331,6 +298,23 @@ const getHomeAndSearchVideos = asyncHandler(async (req, res) => {
     return res.status(200)
         .json(new ApiResponse(200, paginatedVideos, "Videos fetched successfully"));
 
+})
+
+const getVideoById = asyncHandler(async (req, res) => {
+    const { videoId } = req.params
+
+    if (!mongoose.Types.ObjectId.isValid(videoId)) {
+        throw new ApiError(404, "Invalid Video Id provided")
+    }
+
+    const video = await Video.findById(videoId)
+
+    if (!video) {
+        throw new ApiError(404, "Video not found")
+    }
+
+    return res.status(200)
+       .json(new ApiResponse(200, video, "Video fetched successfully"))
 })
 
 const playVideo = asyncHandler(async (req, res) => {
@@ -666,8 +650,8 @@ export {
     uploadVideo,
     updateVideoDetails,
     deleteVideo,
-    togglePublishStatus,
     getChannelVideos,
     getHomeAndSearchVideos,
+    getVideoById,
     playVideo,
 }
