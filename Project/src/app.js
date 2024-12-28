@@ -10,6 +10,12 @@ app.use(cors({
     credentials: true
 }))
 
+app.use((req, res, next) => {
+    res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
+    next();
+});
+
+
 // MIDDLEWARE - Plugins of express
 app.use(express.json({limit: "20kb"}))
 app.use(express.urlencoded({extended: true, limit: "20kb"}))

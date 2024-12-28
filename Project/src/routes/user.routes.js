@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { registerUser, loginUser, logoutUser, changeCurrentPassword } from "../controllers/user.controller.js";
+import { registerUser, loginUser, loginWithGoogle, logoutUser, changeCurrentPassword } from "../controllers/user.controller.js";
 import { refreshTheTokens, getCurrentUser, updateAccountDetails, getChannelById, getWatchHistory, deleteAccount } from "../controllers/user.controller.js";
 import { upload } from "../middlewares/multer.middleware.js"
 import { verifyJWT } from "../middlewares/auth.middleware.js";
@@ -20,6 +20,8 @@ userRouter.route("/register").post(upload.fields([
 )
 
 userRouter.route("/login").post(loginUser);
+
+userRouter.route("/login-with-google").post(loginWithGoogle);
 
 userRouter.route("/logout").post(verifyJWT, logoutUser);
 

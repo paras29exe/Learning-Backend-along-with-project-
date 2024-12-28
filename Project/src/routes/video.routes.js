@@ -4,9 +4,10 @@ import {
     updateVideoDetails,
     deleteVideo,
     getChannelVideos,
-    getHomeAndSearchVideos,
+    getHomeVideos,
+    getSearchVideos,
     getVideoById,
-    playVideo
+    playVideo,
 } from "../controllers/video.controller.js";
 
 import { verifyJWT } from "../middlewares/auth.middleware.js"
@@ -31,10 +32,12 @@ videoRouter.route("/delete-video/:videoId").delete(verifyJWT, deleteVideo)
 
 videoRouter.route("/get-channel-videos/:username").get(getChannelVideos)
 
-videoRouter.route("/get-videos").get(getHomeAndSearchVideos)
+videoRouter.route("/get-videos").get(getHomeVideos)
+
+videoRouter.route("/get-searched-videos").get(getSearchVideos)
 
 videoRouter.route("/get-video/:videoId").get(getVideoById)
 
-videoRouter.route("/play-video").get(playVideo)
+videoRouter.route("/play-video/:videoId").get(playVideo)
 
 export default videoRouter;

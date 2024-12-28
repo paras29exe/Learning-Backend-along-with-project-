@@ -27,7 +27,7 @@ async function findOwnerOfVideo(req) {
     const video = await Video.findById(videoId)
 
     // extracting the owner of video doc and its owner id in string
-    const isVideoOwner = video.ownerId.toString()
+    const isVideoOwner = video.ownerId.toString() === req?.user?._id.toString()
 
     return { video, isVideoOwner }
 }
@@ -37,7 +37,7 @@ const uploadVideo = asyncHandler(async (req, res) => {
     // save the video file and thumbnail file in temp folder then upload to cloudinary
     // save the details in the database as a Video model instance
     // return the response with the video data
-    const { title, description } = req.body && req.body;
+    const { title, description, publishStatus } = req.body && req.body;
     const thumbnailLocalPath = req.files?.thumbnail?.[0]?.path
     const videoLocalPath = req.files?.videoFile?.[0]?.path
 
@@ -51,7 +51,7 @@ const uploadVideo = asyncHandler(async (req, res) => {
             throw new ApiError(400, "Video file is required field", "videoFile")
         }
 
-        if (!title && !description && !thumbnailLocalPath && !videoLocalPath) {
+        if (!title && !description && !publishStatus) {
             throw new ApiError(400, "All fields must be Provided");
         }
 
@@ -74,6 +74,7 @@ const uploadVideo = asyncHandler(async (req, res) => {
             description: String(description).trim(),
             thumbnail: thumbnail.url,
             videoFile: videoFile.url,
+            publishStatus: publishStatus.toLowerCase() || 'public',
             duration: formattedDuration(videoFile.duration),
             ownerId: req.user._id,
             ownerUsername: req.user.username,
@@ -97,6 +98,8 @@ const uploadVideo = asyncHandler(async (req, res) => {
             return res.status(400)
                 .json(new ApiResponse(400, null, "File size exceeds the allowed limit of 50MB."));
         }
+        console.log(error);
+        
 
         // Handle other errors
         next(error); // Pass the error to the global error handler
@@ -149,7 +152,7 @@ const updateVideoDetails = asyncHandler(async (req, res) => {
     )
 
     // deleting old thumbnail if new one is provided
-    if (thumbnailLocalPath && thumbnail && video.thumbnail ) {
+    if (thumbnailLocalPath && thumbnail && video.thumbnail) {
         await deleteFileFromCloudinary(video.thumbnail)
     }
 
@@ -172,16 +175,23 @@ const deleteVideo = asyncHandler(async (req, res) => {
     }
 
     // now the user is authenticated to delete the video
-    const deleted = await Video.deleteOne(video._id, { secure: true })
+    const deletedVideo = await Video.findByIdAndDelete(video._id, { secure: true })
     const deletedLikes = await Like.deleteMany({ video: video._id })
+
+    // removing video from user's watch history and all comments related to this video
+    await User.updateMany({}, {
+        $pull: {
+            watchHistory: video._id
+        }
+    })
 
     const comments = await Comment.find({ videoId: video._id })
     const commentIds = comments.map((comment) => comment._id)
-    const deletedCommentLikes = await Like.deleteMany({ comment: { $in: commentIds } });
 
+    const deletedCommentLikes = await Like.deleteMany({ comment: { $in: commentIds } });
     const deletedComments = await Comment.deleteMany({ videoId: video._id })
 
-    if (!deleted || !deletedLikes || !deletedCommentLikes || !deletedComments) {
+    if (!deletedVideo || !deletedLikes || !deletedCommentLikes || !deletedComments) {
         throw new ApiError(500, "Video Deletion failed! Try again later")
     }
 
@@ -194,7 +204,7 @@ const deleteVideo = asyncHandler(async (req, res) => {
     }
 
     return res.status(200)
-        .json(new ApiResponse(200, { video: "video has been removed" }, "Video Deleted successfully"))
+        .json(new ApiResponse(200, deletedVideo, "Video Deleted successfully"))
 })
 
 const getChannelVideos = asyncHandler(async (req, res) => {
@@ -218,7 +228,78 @@ const getChannelVideos = asyncHandler(async (req, res) => {
         .json(new ApiResponse(200, videos, "Videos fetched successfully"));
 })
 
-const getHomeAndSearchVideos = asyncHandler(async (req, res) => {
+const getHomeVideos = asyncHandler(async (req, res) => {
+    // NOTE: First of all create a index in mongo db ATLAS for searching video based on query [ask to google or something]
+    // validating if user is logged in or not
+    req.user = await isLoggedIn(req)
+
+    const { page = 1, limit = 10, order = "asc" } = req.query;
+    const sortOrder = (order === "desc") ? -1 : 1;
+
+    try {
+        const pipeline = [];
+        const alreadyFetchedIds = []
+
+        if (req.user) {
+            // console.log(req.user);
+            pipeline.push(
+                {
+                    $match: {
+                        _id: { $nin: alreadyFetchedIds.map(id => new ObjectId(id)) },
+                        ownerId: { $ne: req.user._id },
+                        publishStatus: "public"
+                    }
+                }
+            )
+        } else {
+            pipeline.push(
+                {
+                    $match: {
+                        publishStatus: "public"
+                    }
+                }
+            )
+        }
+
+        pipeline.push({
+            $sample: { size: parseInt(limit) }
+        })
+
+        pipeline.push({
+            $project: {
+                title: 1,
+                thumbnail: 1,
+                publishStatus: 1,
+                views: 1,
+                duration: 1,
+                ownerId: 1,
+                ownerAvatar: 1,
+                ownerChannelName: 1,
+                ownerUsername: 1,
+                createdAt: 1
+            }
+        });
+
+        const options = {
+            page: parseInt(page),
+            limit: parseInt(limit),
+        }
+
+        // if (sortBy && sortOrder) {
+        //     options.sort = { [sortBy]: sortOrder }
+        // }
+
+        const homeVideos = await Video.aggregatePaginate(pipeline, options)
+
+        return res.status(200)
+            .json(new ApiResponse(200, homeVideos, "Videos fetched successfully"));
+    } catch (error) {
+        console.error(error)
+    }
+
+})
+
+const getSearchVideos = asyncHandler(async (req, res) => {
     // NOTE: First of all create a index in mongo db ATLAS for searching video based on query [ask to google or something]
     // validating if user is logged in or not
     req.user = await isLoggedIn(req)
@@ -226,77 +307,97 @@ const getHomeAndSearchVideos = asyncHandler(async (req, res) => {
     const { page = 1, limit = 10, sortBy = "createdAt", order = "asc", query } = req.query;
 
     const sortOrder = (order === "desc") ? -1 : 1;
+    if (!query) throw new ApiError(400, "Invalid query provided for searching")
 
-    const pipeline = [];
-    const alreadyFetchedIds = []
-
-    if (req.user) {
-        // console.log(req.user);
-        pipeline.push(
-            {
-                $match: {
-                    _id: { $nin: alreadyFetchedIds.map(id => new ObjectId(id)) },
-                    ownerId: { $ne: req.user._id },
-                    publishStatus: "public"
-                }
-            }
-        )
-    } else {
-        pipeline.push(
-            {
-                $match: {
-                    publishStatus: "public"
-                }
-            }
-        )
-    }
-
-    if (query) {
-        pipeline.push(
+    try {
+        const pipeline = [
             {
                 $search: {
                     index: "search-videos",
                     text: {
                         query: query,
-                        path: ["title", "ownerChannelName"], // search in title and ownerUsername fields
+                        path: ["title", "ownerChannelName"],
+                        fuzzy: { maxEdits: 2 }
                     }
                 }
-            }
-        )
-    }
+            },
+            {
+                $addFields: {
+                    score: { $meta: "searchScore" }
+                }
+            },
+            {
+                $match: {
+                    score: { $gt: 0.2 }
+                }
+            },
 
-    pipeline.push({
-        $sample: { size: parseInt(limit) }
-    })
+        ];
+        const alreadyFetchedIds = []
 
-    pipeline.push({
-        $project: {
-            title: 1,
-            thumbnail: 1,
-            publishStatus: 1,
-            views: 1,
-            duration: 1,
-            ownerId: 1,
-            ownerAvatar: 1,
-            ownerChannelName: 1,
-            ownerUsername: 1,
-            createdAt: 1
+        if (req.user) {
+            // console.log(req.user);
+            pipeline.push(
+                {
+                    $match: {
+                        _id: { $nin: alreadyFetchedIds.map(id => new ObjectId(id)) },
+                        ownerId: { $ne: req.user._id },
+                        publishStatus: "public"
+                    }
+                }
+            )
+        } else {
+            pipeline.push(
+                {
+                    $match: {
+                        publishStatus: "public"
+                    }
+                }
+            )
         }
-    });
 
-    const options = {
-        page: parseInt(page),
-        limit: parseInt(limit),
+        // pipeline.push({
+        //     $sample: { size: parseInt(limit) }
+        // })
+
+        pipeline.push({
+            $project: {
+                title: 1,
+                thumbnail: 1,
+                publishStatus: 1,
+                description: 1,
+                score: { $meta: "searchScore" },
+                views: 1,
+                duration: 1,
+                ownerId: 1,
+                ownerAvatar: 1,
+                ownerChannelName: 1,
+                ownerUsername: 1,
+                createdAt: 1
+            }
+        });
+
+        pipeline.push(
+            { $skip: parseInt(page) - 1 },
+            { $limit: parseInt(limit) }
+        )
+
+        // const options = {
+        //     page: parseInt(page),
+        //     limit: parseInt(limit),
+        // }
+
+        // if (sortBy && sortOrder) {
+        //     options.sort = { [sortBy]: sortOrder }
+        // }
+
+        const searchedVideos = await Video.aggregate(pipeline)
+
+        return res.status(200)
+            .json(new ApiResponse(200, searchedVideos, "Videos fetched successfully"));
+    } catch (error) {
+        console.error(error)
     }
-
-    // if (sortBy && sortOrder) {
-    //     options.sort = { [sortBy]: sortOrder }
-    // }
-
-    const paginatedVideos = await Video.aggregatePaginate(pipeline, options)
-
-    return res.status(200)
-        .json(new ApiResponse(200, paginatedVideos, "Videos fetched successfully"));
 
 })
 
@@ -314,7 +415,7 @@ const getVideoById = asyncHandler(async (req, res) => {
     }
 
     return res.status(200)
-       .json(new ApiResponse(200, video, "Video fetched successfully"))
+        .json(new ApiResponse(200, video, "Video fetched successfully"))
 })
 
 const playVideo = asyncHandler(async (req, res) => {
@@ -326,324 +427,324 @@ const playVideo = asyncHandler(async (req, res) => {
     // finally return the response with all the required details
 
     req.user = await isLoggedIn(req)
+    const { video, isVideoOwner } = await findOwnerOfVideo(req)
+    const { videoId } = req.params
+    try {
 
-    const { videoId } = req.query
-    const { selfVideo } = req.body
+        if (!mongoose.Types.ObjectId.isValid(videoId)) {
+            throw new ApiError(404, "Invalid Video Id provided")
+        }
 
-    if (!mongoose.Types.ObjectId.isValid(videoId)) {
-        throw new ApiError(404, "Invalid Video Id provided")
-    }
+        const randomVideosQuery = {
+            "publishStatus": "public",
+            _id: { $ne: mongoose.Types.ObjectId.createFromHexString(videoId) }
+        }
 
-    const randomVideosQuery = {
-        "publishStatus": "public",
-        _id: { $ne: mongoose.Types.ObjectId.createFromHexString(videoId) }
-    }
+        if (req.user) {
+            randomVideosQuery.ownerId = { $ne: req.user._id }
+        }
 
-    if (req.user) {
-        randomVideosQuery.ownerId = { $ne: req.user._id }
-    }
-
-    const pipeline = [
-        {
-            $facet: {
-                videoDetails: [
-                    {
-                        $match: {
-                            _id: mongoose.Types.ObjectId.createFromHexString(videoId),
-                            publishStatus: { $ne: (!selfVideo ? "private" : "")},
-                            ownerId: { $ne: (!selfVideo ? req?.user?._id : "") }
-                        }
-                    },
-                    {
-                        $addFields: { videoId: "$_id" }
-                    },
-                    // looking how many documents in likes collection has video id of this as "video" field
-                    {
-                        $lookup: {
-                            from: "likes",
-                            localField: "_id",
-                            foreignField: "video",
-                            as: "likes",
-                        }
-                    },
-                    {
-                        $addFields: {
-                            likesCount: { $size: "$likes" }
-                        }
-                    },
-                    // finding if any document has viewer Id as "likedBy" and also video Id as "video"
-                    {
-                        $lookup: {
-                            from: "likes",
-                            let: {
-                                videoId: "$_id",
-                                viewer: req.user?._id
-                            },
-                            pipeline: [
-                                {
-                                    $match: {
-                                        $expr: {
-                                            $and: [
-                                                { $eq: ["$video", "$$videoId"] },
-                                                { $eq: ["$likedBy", "$$viewer"] }
-                                            ]
+        const pipeline = [
+            {
+                $facet: {
+                    videoDetails: [
+                        {
+                            $match: {
+                                _id: mongoose.Types.ObjectId.createFromHexString(videoId),
+                                publishStatus: { $ne: (!isVideoOwner ? "private" : "") },
+                                ownerId: { $ne: (!isVideoOwner ? req?.user?._id : "") }
+                            }
+                        },
+                        {
+                            $addFields: { videoId: "$_id" }
+                        },
+                        // looking how many documents in likes collection has video id of this as "video" field
+                        {
+                            $lookup: {
+                                from: "likes",
+                                localField: "_id",
+                                foreignField: "video",
+                                as: "likes",
+                            }
+                        },
+                        {
+                            $addFields: {
+                                likesCount: { $size: "$likes" }
+                            }
+                        },
+                        // finding if any document has viewer Id as "likedBy" and also video Id as "video"
+                        {
+                            $lookup: {
+                                from: "likes",
+                                let: {
+                                    videoId: "$_id",
+                                    viewer: req.user?._id
+                                },
+                                pipeline: [
+                                    {
+                                        $match: {
+                                            $expr: {
+                                                $and: [
+                                                    { $eq: ["$video", "$$videoId"] },
+                                                    { $eq: ["$likedBy", "$$viewer"] }
+                                                ]
+                                            }
+                                        }
+                                    },
+                                ],
+                                as: "likedOrNot"
+                            }
+                        },
+                        {
+                            $addFields: {
+                                likedByViewer: {
+                                    $cond: [
+                                        { $eq: [{ $size: "$likedOrNot" }, 1] },
+                                        true,
+                                        false,
+                                    ]
+                                }
+                            }
+                        },
+                        {
+                            $lookup: {
+                                from: "users",
+                                localField: "ownerId",
+                                foreignField: "_id",
+                                as: "channelDetails",
+                                pipeline: [
+                                    {
+                                        $addFields: {
+                                            channelName: "$fullName",
+                                        }
+                                    },
+                                    // finding his subscribers from subscriptions collection that how many documents has his id as channel
+                                    {
+                                        $lookup: {
+                                            from: "subscriptions",
+                                            localField: "_id",
+                                            foreignField: "channel",
+                                            as: "subscribers",
+                                        }
+                                    },
+                                    {
+                                        $addFields: {
+                                            subscribersCount: { $size: "$subscribers" },
+                                        }
+                                    },
+                                    // findind that whether viewer has subscribed or not by finding document which has viewer id as "subscriber" and channel id as "channel"
+                                    {
+                                        $lookup: {
+                                            from: "subscriptions",
+                                            let: {
+                                                channelId: "$_id",
+                                                viewer: req.user?._id
+                                            },
+                                            pipeline: [
+                                                {
+                                                    $match: {
+                                                        $expr: {
+                                                            $and: [
+                                                                { $eq: ["$channel", "$$channelId"] },
+                                                                { $eq: ["$subscriber", "$$viewer"] }
+                                                            ]
+                                                        }
+                                                    }
+                                                },
+                                            ],
+                                            as: "subscribedOrNot"
+                                        }
+                                    },
+                                    {
+                                        $addFields: {
+                                            subscribedByViewer: {
+                                                $cond: [
+                                                    { $eq: [{ $size: "$subscribedOrNot" }, 1] },
+                                                    true,
+                                                    false
+                                                ]
+                                            }
+                                        }
+                                    },
+                                    {
+                                        $project: {
+                                            _id: 1,
+                                            channelId: 1,
+                                            channelName: 1,
+                                            username: 1,
+                                            avatar: 1,
+                                            subscribersCount: 1,
+                                            subscribedByViewer: 1
                                         }
                                     }
-                                },
-                            ],
-                            as: "likedOrNot"
-                        }
-                    },
-                    {
-                        $addFields: {
-                            likedByViewer: {
-                                $cond: [
-                                    { $eq: [{ $size: "$likedOrNot" }, 1] },
-                                    true,
-                                    false,
                                 ]
                             }
-                        }
-                    },
-                    {
-                        $lookup: {
-                            from: "users",
-                            localField: "ownerId",
-                            foreignField: "_id",
-                            as: "channelDetails",
-                            pipeline: [
-                                {
-                                    $addFields: {
-                                        channelName: "$fullName",
-                                    }
-                                },
-                                // finding his subscribers from subscriptions collection that how many documents has his id as channel
-                                {
-                                    $lookup: {
-                                        from: "subscriptions",
-                                        localField: "_id",
-                                        foreignField: "channel",
-                                        as: "subscribers",
-                                    }
-                                },
-                                {
-                                    $addFields: {
-                                        subscribersCount: { $size: "$subscribers" },
-                                    }
-                                },
-                                // findind that whether viewer has subscribed or not by finding document which has viewer id as "subscriber" and channel id as "channel"
-                                {
-                                    $lookup: {
-                                        from: "subscriptions",
-                                        let: {
-                                            channelId: "$_id",
-                                            viewer: req.user?._id
-                                        },
-                                        pipeline: [
-                                            {
-                                                $match: {
-                                                    $expr: {
-                                                        $and: [
-                                                            { $eq: ["$channel", "$$channelId"] },
-                                                            { $eq: ["$subscriber", "$$viewer"] }
-                                                        ]
-                                                    }
-                                                }
-                                            },
-                                        ],
-                                        as: "subscribedOrNot"
-                                    }
-                                },
-                                {
-                                    $addFields: {
-                                        subscribedByViewer: {
-                                            $cond: [
-                                                { $eq: [{ $size: "$subscribedOrNot" }, 1] },
-                                                true,
-                                                false
-                                            ]
+                        },
+                        {
+                            $unwind: "$channelDetails",
+                        },
+                        /* {
+                            $lookup: {
+                                from: "comments",
+                                localField: "_id",
+                                foreignField: "videoId",
+                                as: "comments",
+                                pipeline: [
+                                    {
+                                        $sort: {
+                                            createdAt: -1
                                         }
-                                    }
-                                },
-                                {
-                                    $project: {
-                                        _id: 1,
-                                        channelId: 1,
-                                        channelName: 1,
-                                        username: 1,
-                                        avatar: 1,
-                                        subscribersCount: 1,
-                                        subscribedByViewer: 1
-                                    }
-                                }
-                            ]
-                        }
-                    },
-                    {
-                        $unwind: "$channelDetails",
-                    },
-                    /* {
-                        $lookup: {
-                            from: "comments",
-                            localField: "_id",
-                            foreignField: "videoId",
-                            as: "comments",
-                            pipeline: [
-                                {
-                                    $sort: {
-                                        createdAt: -1
-                                    }
-                                },
-                                {
-                                    $lookup: {
-                                        from: "likes",
-                                        localField: "_id",
-                                        foreignField: "comment",
-                                        as: "likesOnComment",
-                                    }
-                                },
-                                {
-                                    $addFields: {
-                                        // overwriting existing "likesOnComment" documents array with their count
-                                        likesOnComment: { $size: "$likesOnComment" }
-                                    }
-                                },
-                                {
-                                    $lookup: {
-                                        from: "likes",
-                                        let: {
-                                            commentId: "$_id",
-                                            viewer: req.user?._id
-                                        },
-                                        pipeline: [
-                                            {
-                                                $match: {
-                                                    $expr: {
-                                                        $and: [
-                                                            { $eq: ["$comment", "$$commentId"] },
-                                                            { $eq: ["$likedBy", "$$viewer"] }
-                                                        ]
-                                                    }
-                                                }
-                                            },
-                                        ],
-                                        as: "likedByViewer"
-                                    }
-                                },
-                                {
-                                    $addFields: {
-                                        // overwriting the existing "likedByViewer" field with true or false if it has viewer document in it or not
-                                        likedByViewer: {
-                                            $cond: [
-                                                { $eq: [{ $size: "$likedByViewer" }, 1] },
-                                                true,
-                                                false
-                                            ]
+                                    },
+                                    {
+                                        $lookup: {
+                                            from: "likes",
+                                            localField: "_id",
+                                            foreignField: "comment",
+                                            as: "likesOnComment",
                                         }
-                                    }
-                                },
-    
-                            ]
-                        }
-                    },*/
-                    {
-                        $project: {
-                            _id: 1,
-                            title: 1,
-                            description: 1,
-                            thumbnail: 1,
-                            videoFile: 1,
-                            views: 1,
-                            likesCount: 1,
-                            likedByViewer: 1, //
-                            ownerId: 1,
-                            channelDetails: 1,
-                            // comments: 1,
-                            createdAt: 1
-                        }
-                    },
-                ],
+                                    },
+                                    {
+                                        $addFields: {
+                                            // overwriting existing "likesOnComment" documents array with their count
+                                            likesOnComment: { $size: "$likesOnComment" }
+                                        }
+                                    },
+                                    {
+                                        $lookup: {
+                                            from: "likes",
+                                            let: {
+                                                commentId: "$_id",
+                                                viewer: req.user?._id
+                                            },
+                                            pipeline: [
+                                                {
+                                                    $match: {
+                                                        $expr: {
+                                                            $and: [
+                                                                { $eq: ["$comment", "$$commentId"] },
+                                                                { $eq: ["$likedBy", "$$viewer"] }
+                                                            ]
+                                                        }
+                                                    }
+                                                },
+                                            ],
+                                            as: "likedByViewer"
+                                        }
+                                    },
+                                    {
+                                        $addFields: {
+                                            // overwriting the existing "likedByViewer" field with true or false if it has viewer document in it or not
+                                            likedByViewer: {
+                                                $cond: [
+                                                    { $eq: [{ $size: "$likedByViewer" }, 1] },
+                                                    true,
+                                                    false
+                                                ]
+                                            }
+                                        }
+                                    },
+        
+                                ]
+                            }
+                        },*/
+                        {
+                            $project: {
+                                _id: 1,
+                                title: 1,
+                                description: 1,
+                                thumbnail: 1,
+                                videoFile: 1,
+                                views: 1,
+                                likesCount: 1,
+                                likedByViewer: 1, //
+                                ownerId: 1,
+                                channelDetails: 1,
+                                // comments: 1,
+                                createdAt: 1
+                            }
+                        },
+                    ],
+                }
+            },
+            {
+                $unwind: "$videoDetails"
             }
-        },
-        {
-            $unwind: "$videoDetails"
+        ]
+
+        if (!isVideoOwner) {
+            pipeline[0].$facet.randomVideos = [
+                {
+                    $match: randomVideosQuery
+                },
+                {
+                    $sample: { size: 15 }
+                },
+                {
+                    $lookup: {
+                        from: "users",
+                        localField: "ownerId",
+                        foreignField: "_id",
+                        as: "channelDetails",
+                    }
+                },
+                {
+                    $unwind: "$channelDetails",
+                },
+                {
+                    $addFields: {
+                        channelId: "$channelDetails._id",
+                        channelName: "$channelDetails.fullName",
+                        channelAvatar: "$channelDetails.avatar",
+                    }
+                },
+                {
+                    $project: {
+                        _id: 1,
+                        title: 1,
+                        thumbnail: 1,
+                        views: 1,
+                        duration: 1,
+                        createdAt: 1,
+                        channelName: 1,
+                        channelAvatar: 1,
+                        channelId: 1,
+                    }
+                },
+            ];
         }
-    ]
 
-    if (!selfVideo) {
-        pipeline[0].$facet.randomVideos = [
-            {
-                $match: randomVideosQuery
-            },
-            {
-                $sample: { size: 15 }
-            },
-            {
-                $lookup: {
-                    from: "users",
-                    localField: "ownerId",
-                    foreignField: "_id",
-                    as: "channelDetails",
-                }
-            },
-            {
-                $unwind: "$channelDetails",
-            },
-            {
-                $addFields: {
-                    channelId: "$channelDetails._id",
-                    channelName: "$channelDetails.fullName",
-                    channelAvatar: "$channelDetails.avatar",
-                }
-            },
-            {
-                $project: {
-                    _id: 1,
-                    title: 1,
-                    thumbnail: 1,
-                    views: 1,
-                    duration: 1,
-                    createdAt: 1,
-                    channelName: 1,
-                    channelAvatar: 1,
-                    channelId: 1,
-                }
-            },
-        ];
+        // refer to "src/reference/reference_for_playvideo_page.png" to know why we are collecting all this data
+        const videoPage = await Video.aggregate(pipeline)
+
+        if (!videoPage[0]) {
+            throw new ApiError(404, "This video is private Or cannot be played")
+        }
+
+        // increasing video views count by 1
+        if (!isVideoOwner) {
+            await Video.updateOne({ _id: videoId },
+                {
+                    $inc: { views: 1 }
+                },
+                { new: true }
+            )
+
+            // adding it to users watch History 
+            await User.findByIdAndUpdate(
+                req.user?._id,
+                {
+                    $addToSet: { watchHistory: videoId }, // Remove if it exists
+                },
+                { new: true }
+            );
+        }
+
+        return res.status(200)
+            .json(new ApiResponse(200, videoPage[0], "Video Page Data has been fetched"))
+
+    } catch (error) {
+        console.error(error);
     }
-
-    // refer to "src/reference/reference_for_playvideo_page.png" to know why we are collecting all this data
-    const videoPage = await Video.aggregate(pipeline)
-
-    if (!videoPage[0]) {
-        throw new ApiError(404, "This video is private Or cannot be played")
-    }
-    // increasing video views count by 1
-    await Video.updateOne({ _id: videoId },
-        {
-            $inc: { views: 1 }
-        },
-        { new: true }
-    )
-
-    // adding it to users watch History 
-    await User.findByIdAndUpdate(req.user?._id,
-        {
-            $pull: {
-                watchHistory: videoId
-            }
-        },
-        {
-            $push: {
-                watchHistory: videoId
-            }
-        },
-        { new: true }
-    )
-
-    return res.status(200)
-        .json(new ApiResponse(200, videoPage[0], "Video Page Data has been fetched"))
-
 })
 
 export {
@@ -651,7 +752,8 @@ export {
     updateVideoDetails,
     deleteVideo,
     getChannelVideos,
-    getHomeAndSearchVideos,
+    getHomeVideos,
+    getSearchVideos,
     getVideoById,
     playVideo,
 }

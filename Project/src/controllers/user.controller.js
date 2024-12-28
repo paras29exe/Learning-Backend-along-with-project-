@@ -7,7 +7,9 @@ import { ApiResponse } from "../utils/apiResponse.js"
 import jwt from "jsonwebtoken"
 import mongoose from "mongoose"
 import fs from "fs"
+import { OAuth2Client } from "google-auth-library"
 import isLoggedIn from "../utils/isLoggedIn.js"
+import { jwtDecode } from "jwt-decode"
 
 const generateAccessAndRefreshToken = async (userId) => {
     // try catch 
@@ -135,7 +137,49 @@ const loginUser = asyncHandler(async (req, res, next) => {
     return res.status(200)
         .cookie("accessToken", accessToken, { ...options, maxAge: parseInt(process.env.ACCESS_TOKEN_EXPIRY) * 24 * 60 * 60 * 1000 })
         .cookie("refreshToken", refreshToken, { ...options, maxAge: parseInt(process.env.REFRESH_TOKEN_EXPIRY) * 24 * 60 * 60 * 1000 })
-        .json(new ApiResponse(200, { user: loggedInUser, accessToken, refreshToken }, "User logged in successfully"))
+        .json(new ApiResponse(200, loggedInUser, "User logged in successfully"))
+})
+
+const loginWithGoogle = asyncHandler(async (req, res, next) => {
+    const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID)
+    const { token } = req.body
+    try {
+        const ticket = await client.verifyIdToken({
+            idToken: token,
+            audience: process.env.GOOGLE_CLIENT_ID
+        });
+
+        const payload = ticket.getPayload();
+        const { email, sub, name, picture } = payload
+
+        let user = await User.findOne({email}).select("-password -watchHistory -refreshToken")
+        if (!user) {
+            user = await User.create({
+                fullName: name,
+                email: email,
+                username: email.split("@")[0],
+                password: String(sub),
+                avatar: picture
+            }).select("-password -watchHistory -refreshToken")
+        }
+        console.log(user)
+        const { accessToken, refreshToken } = await generateAccessAndRefreshToken(user._id)
+        const options = {
+            httpOnly: true,
+            secure: true,
+            sameSite: 'lax'
+        }
+
+        return res.status(200)
+            .cookie("accessToken", accessToken, { ...options, maxAge: parseInt(process.env.ACCESS_TOKEN_EXPIRY) * 24 * 60 * 60 * 1000 })
+            .cookie("refreshToken", refreshToken, { ...options, maxAge: parseInt(process.env.REFRESH_TOKEN_EXPIRY) * 24 * 60 * 60 * 1000 })
+            .json(new ApiResponse(200, user, "User logged in successfully"))
+
+    } catch (error) {
+        console.log(error);
+        
+        throw new ApiError(401, "Failed to login with Google", error)
+    }
 })
 
 const logoutUser = asyncHandler(async (req, res) => {
@@ -171,7 +215,7 @@ const refreshTheTokens = asyncHandler(async (req, res, next) => {
     // token is sent to user in encoded form so decode it first by comparing to get the user Id
     const decodedToken = jwt.verify(savedRefreshToken, process.env.REFRESH_TOKEN_SECRET)
 
-    const loggedUser = await User.findById(decodedToken._id)
+    const loggedUser = await User.findById(decodedToken._id).select("-password -refreshToken - watchHistory")
 
     if (savedRefreshToken !== loggedUser.refreshToken) {
         throw new ApiError(401, "Access token is expired")
@@ -188,7 +232,7 @@ const refreshTheTokens = asyncHandler(async (req, res, next) => {
     return res.status(200)
         .cookie("accessToken", accessToken, { ...options, maxAge: parseInt(process.env.ACCESS_TOKEN_EXPIRY) * 24 * 60 * 60 * 1000 })
         .cookie("refreshToken", refreshToken, { ...options, maxAge: parseInt(process.env.REFRESH_TOKEN_EXPIRY) * 24 * 60 * 60 * 1000 })
-        .json(new ApiResponse(200, { user: loggedUser, accessToken, newRefreshToken: refreshToken }, "Access token refreshed successfully"))
+        .json(new ApiResponse(200, loggedUser, "Access token refreshed successfully"))
 })
 
 const changeCurrentPassword = asyncHandler(async (req, res) => {
@@ -642,6 +686,7 @@ const deleteAccount = asyncHandler(async (req, res) => {
 export {
     registerUser,
     loginUser,
+    loginWithGoogle,
     logoutUser,
     refreshTheTokens,
     changeCurrentPassword,
