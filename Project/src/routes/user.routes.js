@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { registerUser, loginUser, loginWithGoogle, logoutUser, changeCurrentPassword } from "../controllers/user.controller.js";
-import { refreshTheTokens, getCurrentUser, updateAccountDetails, getChannelById, getWatchHistory, deleteAccount } from "../controllers/user.controller.js";
+import { refreshTheTokens, getCurrentUser, updateAccountDetails, getChannelById, getWatchHistory, removeVideoFromWatchHistory, deleteAccount } from "../controllers/user.controller.js";
 import { upload } from "../middlewares/multer.middleware.js"
 import { verifyJWT } from "../middlewares/auth.middleware.js";
 
@@ -45,6 +45,8 @@ userRouter.route("/update-account-details").put(verifyJWT, upload.fields([
 userRouter.route("/get-channel/:username").get(getChannelById)
 
 userRouter.route("/get-watch-history").get(verifyJWT, getWatchHistory)
+
+userRouter.route("/remove-video-from-watch-history/:videoId").delete(verifyJWT, removeVideoFromWatchHistory)
 
 userRouter.route("/delete-account").delete(verifyJWT, deleteAccount)
 

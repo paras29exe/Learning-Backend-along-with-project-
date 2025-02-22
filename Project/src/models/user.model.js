@@ -34,6 +34,7 @@ const userSchema = new Schema({ /* we can also directly use schema from mongoose
     },
     coverImage: {
         type: String, // cloudinary url
+        default: ""
     },
     watchHistory: [
         {
@@ -43,6 +44,10 @@ const userSchema = new Schema({ /* we can also directly use schema from mongoose
     ],
     refreshToken: {
         type: String
+    },
+    googleLogin: {
+        type: Boolean,
+        default: false
     }
 
 }, { timestamps: true })

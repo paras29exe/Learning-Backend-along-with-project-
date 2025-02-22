@@ -1,4 +1,5 @@
 import { Playlist } from "../models/playlist.model.js";
+import { Video } from "../models/video.model.js";
 import { ApiError } from "../utils/apiError.js";
 import { ApiResponse } from "../utils/apiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
@@ -24,22 +25,31 @@ async function findOwnerOfPlaylist(req) {
     return { playlist, playlistOwner }
 }
 
-const createPlaylist = asyncHandler(async (req, res) => {
+const createPlaylistAndAddVideos = asyncHandler(async (req, res) => {
     // verify the user with verifyJWT middleware
     // take details from form data such as playlist name, description
     // create a new instance of Playlist model with these details
     // save the playlist in the database
     // return the response with the playlist data
+    const { name, description, videoIds } = req.body;
 
-    const { name, description } = req.body;
+    if (!name || !description) throw new ApiError(400, "Please enter a name and description for this playlist")
 
-    if (!name || !description) throw new ApiError(404, "Please enter a name and description for this playlist")
+    const existingPlaylist = await Playlist.findOne({ name: name })
+
+    if (existingPlaylist) throw new ApiError(409, "Playlist with same name already exists", "name")
+
+    // find the thumbanail of first video and set it as cover image of playlist
+    const video = await Video.findById(videoIds[0])
+    const coverImage = video.thumbnail
 
     const playlist = await Playlist.create({
         name,
         description,
         ownerId: req.user._id,
-        ownerChannelName: req.user.fullName
+        ownerChannelName: req.user.fullName,
+        coverImage: coverImage,
+        videos: [...videoIds]
     })
 
     if (!playlist) throw new ApiError(500, "Couldn't create playlist right now")
@@ -48,35 +58,36 @@ const createPlaylist = asyncHandler(async (req, res) => {
         .json(new ApiResponse(200, playlist, "Playlist created successfully"))
 })
 
-const addVideosToPlaylist = asyncHandler(async (req, res) => {
+const addVideosToSelectedPlaylist = asyncHandler(async (req, res) => {
     // verify the user with verifyJWT middleware
     // find the playlist with provided id
     // add the provided video ids to the playlist videos array
     // save the playlist in the database
     // return the response with the updated playlist data
 
-    const { playlist, playlistOwner } = findOwnerOfPlaylist(req)
+    // const { playlist, playlistOwner } = findOwnerOfPlaylist(req)
 
-    if (playlistOwner !== req.user?._id.toString()) throw new ApiError(403, "Unauthorized to add videos to this playlist")
+    // if (playlistOwner !== req.user?._id.toString()) throw new ApiError(403, "Unauthorized to add videos to this playlist")
 
-    const { videoIds } = req.body;
+    const { playlistIds, videoIds } = req.body;
 
     // verify if all video ids provided are in array format valid objectIds
     if (!Array.isArray(videoIds) || !videoIds.every(mongoose.Types.ObjectId.isValid)) {
         throw new ApiError(404, "Video IDs must be in array format and all valid objectIds")
     }
 
-    const updatedPlaylist = await Playlist.findByIdAndUpdate(
-        playlist._id,
+
+    const updatedPlaylist = await Playlist.updateMany(
+        { _id: { $in: playlistIds } },
         {
-            $push: {
+            $addToSet: {
                 videos: { $each: videoIds }
             }
         },
         { new: true }
     )
 
-    if (!updatedPlaylist) throw new ApiError(404, "Playlist with this Id not found")
+    // if (!updatedPlaylist) throw new ApiError(404, "Playlist with this Id not found")
 
     return res.status(200)
         .json(new ApiResponse(200, updatedPlaylist, "Videos added to playlist successfully"))
@@ -192,8 +203,6 @@ const getAllPlaylists = asyncHandler(async (req, res) => {
     const { page = 1, limit = 20, sortBy = "-createdAt", order = "desc" } = req.query;
     const { userId } = req.params;
 
-    if (!username) throw new ApiError(404, "Wrong Query! Please pass a username");
-
     const sortOrder = (order === "desc" ? -1 : 1)
 
     const playlists = await Playlist.find({ ownerId: userId })
@@ -202,7 +211,7 @@ const getAllPlaylists = asyncHandler(async (req, res) => {
         .limit(parseInt(limit))
         .select("name ownerChannelName createdAt")
 
-    if (!playlists.length) return res.status(200).json(new ApiResponse(200, {}, "This user has no playlists"))  // return empty array
+    if (!playlists.length) return res.status(200).json(new ApiResponse(404, {}, "This user has no playlists"))  // return empty array
 
     // const totalPlaylists = await Playlist.countDocuments({ ownerUsername: username })
 
@@ -211,8 +220,8 @@ const getAllPlaylists = asyncHandler(async (req, res) => {
 })
 
 export {
-    createPlaylist,
-    addVideosToPlaylist,
+    createPlaylistAndAddVideos,
+    addVideosToSelectedPlaylist,
     removeVideosFromPlaylist,
     updatePlaylistDetails,
     getPlaylistById,

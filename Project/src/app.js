@@ -51,6 +51,7 @@ app.use((err, req, res, next) => {
         });
     } else {
         // Handle other errors (or create a default ApiError if you prefer)
+        console.log(err)
         return res.status(500)
         .json(new ApiError(500, err.message, err));
     }

@@ -9,7 +9,7 @@ import mongoose from "mongoose"
 import fs from "fs"
 import { OAuth2Client } from "google-auth-library"
 import isLoggedIn from "../utils/isLoggedIn.js"
-import { jwtDecode } from "jwt-decode"
+import axios from "axios"
 
 const generateAccessAndRefreshToken = async (userId) => {
     // try catch 
@@ -117,6 +117,10 @@ const loginUser = asyncHandler(async (req, res, next) => {
         throw new ApiError(401, "Username or Email not found", "username")
     }
 
+    if (user.googleLogin) {
+        throw new ApiError(401, "Email or username is registered with Google. Please login with Google", "username")
+    }
+
     const isPassValid = await user.isPasswordCorrect(String(password))
 
     if (!isPassValid) {
@@ -141,28 +145,31 @@ const loginUser = asyncHandler(async (req, res, next) => {
 })
 
 const loginWithGoogle = asyncHandler(async (req, res, next) => {
-    const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID)
+    // const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID)
     const { token } = req.body
+
     try {
-        const ticket = await client.verifyIdToken({
-            idToken: token,
-            audience: process.env.GOOGLE_CLIENT_ID
+        const response = await axios.get("https://www.googleapis.com/oauth2/v3/userinfo", {
+            headers: { Authorization: `Bearer ${token}` },
         });
 
-        const payload = ticket.getPayload();
-        const { email, sub, name, picture } = payload
+        const { email, sub, name, picture } = response.data
 
-        let user = await User.findOne({email}).select("-password -watchHistory -refreshToken")
+        let user = await User.findOne({ email }).select("-password -watchHistory -refreshToken")
+
         if (!user) {
             user = await User.create({
                 fullName: name,
                 email: email,
                 username: email.split("@")[0],
                 password: String(sub),
-                avatar: picture
-            }).select("-password -watchHistory -refreshToken")
+                avatar: picture,
+                googleLogin: true
+            })
         }
-        console.log(user)
+
+        const loggedInUser = await User.findById(user._id).select("-password -refreshToken -watchHistory")
+
         const { accessToken, refreshToken } = await generateAccessAndRefreshToken(user._id)
         const options = {
             httpOnly: true,
@@ -173,12 +180,12 @@ const loginWithGoogle = asyncHandler(async (req, res, next) => {
         return res.status(200)
             .cookie("accessToken", accessToken, { ...options, maxAge: parseInt(process.env.ACCESS_TOKEN_EXPIRY) * 24 * 60 * 60 * 1000 })
             .cookie("refreshToken", refreshToken, { ...options, maxAge: parseInt(process.env.REFRESH_TOKEN_EXPIRY) * 24 * 60 * 60 * 1000 })
-            .json(new ApiResponse(200, user, "User logged in successfully"))
+            .json(new ApiResponse(200, loggedInUser, "User logged in successfully"))
 
     } catch (error) {
         console.log(error);
-        
-        throw new ApiError(401, "Failed to login with Google", error)
+
+        throw new ApiError(500, "Failed to login with Google", error)
     }
 })
 
@@ -215,7 +222,7 @@ const refreshTheTokens = asyncHandler(async (req, res, next) => {
     // token is sent to user in encoded form so decode it first by comparing to get the user Id
     const decodedToken = jwt.verify(savedRefreshToken, process.env.REFRESH_TOKEN_SECRET)
 
-    const loggedUser = await User.findById(decodedToken._id).select("-password -refreshToken - watchHistory")
+    const loggedUser = await User.findById(decodedToken._id).select("-password -watchHistory")
 
     if (savedRefreshToken !== loggedUser.refreshToken) {
         throw new ApiError(401, "Access token is expired")
@@ -269,7 +276,7 @@ const changeCurrentPassword = asyncHandler(async (req, res) => {
 
 const getCurrentUser = asyncHandler(async (req, res) => {
     return res.status(200)
-        .json(new ApiResponse(200, { user: req.user }, "User has been fetched"))
+        .json(new ApiResponse(200, req.user, "User has been fetched"))
 })
 
 const updateAccountDetails = asyncHandler(async (req, res) => {
@@ -569,50 +576,74 @@ const getWatchHistory = asyncHandler(async (req, res) => {
             $match: { _id: userId }
         },
         {
+            $project: {
+                watchHistory: 1 // Preserve the original order
+            }
+        },
+        {
             $lookup: {
                 from: "videos",
                 localField: "watchHistory",
                 foreignField: "_id",
-                as: "watchHistory",
-                pipeline: [
-                    {
-                        $lookup: {
-                            from: "users",
-                            localField: "ownerId",
-                            foreignField: "_id",
-                            as: "owner",
-                            pipeline: [
+                as: "videoDetails"
+            }
+        },
+        {
+            $addFields: {
+                watchHistory: {
+                    $map: {
+                        input: "$watchHistory",
+                        as: "videoId",
+                        in: {
+                            $arrayElemAt: [
                                 {
-                                    $addFields: { channelName: "$fullName" }
-                                },
-                                {
-                                    $project: {
-                                        channelName: 1,
-                                        avatar: 1
+                                    $filter: {
+                                        input: "$videoDetails",
+                                        as: "video",
+                                        cond: { $eq: ["$$video._id", "$$videoId"] }
                                     }
-                                }
+                                },
+                                0
                             ]
                         }
-                    },
-                ]
+                    }
+                }
+            }
+        },
+        {
+            $addFields: {
+                watchHistory: {
+                    $filter: {
+                        input: "$watchHistory",
+                        as: "video",
+                        cond: { $ne: ["$$video", null] } // Remove null entries
+                    }
+                }
             }
         },
         {
             $unwind: "$watchHistory"
         },
         {
-            $replaceRoot: {
-                newRoot: "$watchHistory"
-            }
+            $replaceRoot: { newRoot: "$watchHistory" }
         }
-    ])
-
-    if (watchHistory.length === 0) {
-        return res.status(200).json(new ApiResponse(204, {}, "No videos available in watch history."))
-    }
+    ]);
 
     return res.status(200)
         .json(new ApiResponse(200, watchHistory, "Watch history fetched successfully."));
+})
+
+// remove video from watch history
+const removeVideoFromWatchHistory = asyncHandler(async (req, res) => {
+    const { videoId } = req.params;
+    const userId = req.user._id;
+
+    await User.findByIdAndUpdate(userId, {
+        $pull: { watchHistory: videoId }
+    });
+
+    return res.status(200)
+        .json(new ApiResponse(200, {}, "Video removed from watch history successfully."));
 })
 
 const deleteAccount = asyncHandler(async (req, res) => {
@@ -694,5 +725,6 @@ export {
     updateAccountDetails,
     getChannelById,
     getWatchHistory,
+    removeVideoFromWatchHistory,
     deleteAccount,
 }

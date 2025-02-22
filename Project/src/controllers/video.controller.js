@@ -583,70 +583,6 @@ const playVideo = asyncHandler(async (req, res) => {
                         {
                             $unwind: "$channelDetails",
                         },
-                        /* {
-                            $lookup: {
-                                from: "comments",
-                                localField: "_id",
-                                foreignField: "videoId",
-                                as: "comments",
-                                pipeline: [
-                                    {
-                                        $sort: {
-                                            createdAt: -1
-                                        }
-                                    },
-                                    {
-                                        $lookup: {
-                                            from: "likes",
-                                            localField: "_id",
-                                            foreignField: "comment",
-                                            as: "likesOnComment",
-                                        }
-                                    },
-                                    {
-                                        $addFields: {
-                                            // overwriting existing "likesOnComment" documents array with their count
-                                            likesOnComment: { $size: "$likesOnComment" }
-                                        }
-                                    },
-                                    {
-                                        $lookup: {
-                                            from: "likes",
-                                            let: {
-                                                commentId: "$_id",
-                                                viewer: req.user?._id
-                                            },
-                                            pipeline: [
-                                                {
-                                                    $match: {
-                                                        $expr: {
-                                                            $and: [
-                                                                { $eq: ["$comment", "$$commentId"] },
-                                                                { $eq: ["$likedBy", "$$viewer"] }
-                                                            ]
-                                                        }
-                                                    }
-                                                },
-                                            ],
-                                            as: "likedByViewer"
-                                        }
-                                    },
-                                    {
-                                        $addFields: {
-                                            // overwriting the existing "likedByViewer" field with true or false if it has viewer document in it or not
-                                            likedByViewer: {
-                                                $cond: [
-                                                    { $eq: [{ $size: "$likedByViewer" }, 1] },
-                                                    true,
-                                                    false
-                                                ]
-                                            }
-                                        }
-                                    },
-        
-                                ]
-                            }
-                        },*/
                         {
                             $project: {
                                 _id: 1,
@@ -720,24 +656,29 @@ const playVideo = asyncHandler(async (req, res) => {
             throw new ApiError(404, "This video is private Or cannot be played")
         }
 
-        // increasing video views count by 1
+        // increasing video views count by & adding video to user's watch history
         if (!isVideoOwner) {
-            await Video.updateOne({ _id: videoId },
-                {
-                    $inc: { views: 1 }
-                },
-                { new: true }
-            )
-
-            // adding it to users watch History 
+            // Increment views
+            await Video.findByIdAndUpdate(videoId, { $inc: { views: 1 } }, { new: true });
+        
+            // Add videoId to watch history at the beginning
             await User.findByIdAndUpdate(
                 req.user?._id,
                 {
-                    $addToSet: { watchHistory: videoId }, // Remove if it exists
+                    $pull: { watchHistory: videoId } // Remove if already exists
+                }
+            );
+            
+            await User.findByIdAndUpdate(
+                req.user?._id,
+                {
+                    $push: { watchHistory: { $each: [videoId], $position: 0 } }
                 },
                 { new: true }
             );
+            
         }
+        
 
         return res.status(200)
             .json(new ApiResponse(200, videoPage[0], "Video Page Data has been fetched"))

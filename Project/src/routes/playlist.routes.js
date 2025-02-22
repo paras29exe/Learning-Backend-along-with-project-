@@ -1,12 +1,12 @@
 import { Router } from "express";
 import { verifyJWT } from "../middlewares/auth.middleware.js"
-import { createPlaylist, addVideosToPlaylist, removeVideosFromPlaylist, updatePlaylistDetails, getPlaylistById, getAllPlaylists,  } from "../controllers/playlist.controller.js"
+import { createPlaylistAndAddVideos, addVideosToSelectedPlaylist, removeVideosFromPlaylist, updatePlaylistDetails, getPlaylistById, getAllPlaylists,  } from "../controllers/playlist.controller.js"
 
 const playlistRouter = Router()
 
-playlistRouter.route("/create-playlist").post(verifyJWT, createPlaylist)
+playlistRouter.route("/create-playlist-and-add-videos").post(verifyJWT, createPlaylistAndAddVideos)
 
-playlistRouter.route("/add-videos-to-playlist/:playlistId").post(verifyJWT, addVideosToPlaylist)
+playlistRouter.route("/add-videos-to-selected-playlist").post(verifyJWT, addVideosToSelectedPlaylist)
 
 playlistRouter.route("/remove-videos-from-playlist/:playlistId").post(verifyJWT, removeVideosFromPlaylist)
 

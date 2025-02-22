@@ -15,6 +15,9 @@ const playlistSchema = new mongoose.Schema({
             ref: "Video"
         }
     ],
+    coverImage: {
+        type: String,
+    },
     ownerId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "User"
